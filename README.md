@@ -1,154 +1,88 @@
 # Market Map Agent
 
-Takes a topic — broad or narrow — and produces a **value-chain skeleton** with a
-**market map** of real, source-verified companies at each layer. Reconnaissance
-first, human confirms the scope, then real research budget per layer.
+Give it a topic — broad or narrow ("advanced air mobility", "AI observability",
+"produced water treatment") — and it returns a **value chain** (the stages a
+space moves through) populated with a **market map** (the real companies at each
+stage), every placement grounded in verified sources.
 
-This repo is the **skeleton**: the full LangGraph loop is wired with all six
-nodes, the rescope cap works for real, LangSmith tracing is on when a key is
-present, and every LLM/search call has a deterministic **stub** so the whole
-thing runs end to end offline.
+The hard part isn't generation, it's **scoping**. A one-shot prompt guesses a
+structure and is often wrong, which makes the whole output untrustworthy. This
+agent researches the space first, proposes a bounded structure, has a human
+confirm or correct it, and only then spends research budget per layer.
+
+## How it works
+
+A six-node [LangGraph](https://langchain-ai.github.io/langgraph/) loop:
+
+| Node | Does |
+|------|------|
+| **Recon** | Broad web search (Exa) on the raw topic. Also names the credible outlets (tier 1–3) for this space. |
+| **Propose** | Claude drafts a bounded structure: layers + definitions, in-scope vs excluded-adjacent, a zoom level, and any genuinely open questions. |
+| **Confirm / edit** | Human-in-the-loop gate. The user confirms, edits fields directly (free, unlimited), or asks the model to rescope (capped). A real pause via LangGraph `interrupt()`. |
+| **Execute** | Per-layer company research, parallel, with tier-weighted source corroboration. |
+| **Verify** | Two checks per company: the URL actually resolves (no fabricated links) and the grounded one-liner fits the layer's definition. |
+| **Synthesize** | Assemble the final map — per layer: an explanation plus verified companies. Nothing is dropped silently; rejections and under-corroborated candidates are surfaced with reasons. |
+
+Design points:
+
+- **Rescope cap** — the model gets at most 2 rescope attempts, stated up front on
+  the first proposal. On the cap it hands back to direct editing and says why. A
+  too-thin rescope note gets one free clarifying question, no attempt spent.
+- **Tier-weighted corroboration** — authoritative sources count more; a company
+  below the bar is flagged for human review rather than dropped. No tier 1–3
+  source at all → rejected, with the reason shown.
+- **Honest failure** — an empty layer gets one broadened retry, then stays in the
+  map with a plain status. Every rejection carries a stated reason.
+
+## Stack
+
+| Layer | Choice |
+|---|---|
+| Orchestration | LangGraph (Python) — native `interrupt`/`resume` for the gate |
+| LLM — judgment | Claude (`claude-opus-5`) — Propose, Synthesize |
+| LLM — mechanical | Claude (`claude-sonnet-5`) — recon queries, one-liners, fit checks |
+| Search / verification | Exa |
+| Observability | LangSmith — per-node trace, cost, latency |
+| Backend | FastAPI |
+| Database | Supabase Postgres — run log + LangGraph checkpointer |
+| Frontend | React + Vite |
+
+## Status
+
+Early. The full loop is wired and runs end to end. It ships with deterministic
+offline fixtures, so it runs with no API keys. The real-service paths (LLM
+prompts, Exa company extraction) are built but not yet tuned. Not deployed.
+
+See [`docs/PRD.md`](docs/PRD.md) for the full scope.
+
+## Quickstart
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+
+# a full run, offline, no keys
+.venv/bin/python -m backend.scripts.run_local "AI observability"
+
+# tests
+.venv/bin/python -m pytest backend/tests -q
+```
+
+For a real run: copy `.env.example` → `.env`, add `ANTHROPIC_API_KEY` and
+`EXA_API_KEY` (optionally `LANGSMITH_API_KEY`, `DATABASE_URL`), and set
+`USE_STUBS=false`.
+
+```bash
+.venv/bin/uvicorn backend.app.main:app --reload      # API on :8000
+cd frontend && npm install && npm run dev            # form on :5173
+```
 
 ## Layout
 
 ```
-market-map-agent/
-├── backend/
-│   ├── app/
-│   │   ├── config.py          # env settings (pydantic-settings)
-│   │   ├── state.py           # the state schema — real TypedDicts
-│   │   ├── graph.py           # StateGraph: 6 nodes + rescope back-edge + router
-│   │   ├── nodes/             # recon · propose · confirm · execute · verify · synthesize
-│   │   ├── llm.py             # Claude calls  (+ stub fallbacks)
-│   │   ├── search.py          # Exa calls     (+ stub fallbacks)
-│   │   ├── sources.py         # credibility tiering + 2-source corroboration rule
-│   │   ├── stubs.py           # deterministic offline fixtures
-│   │   ├── checkpointer.py    # Postgres checkpointer / MemorySaver
-│   │   ├── run_log.py         # one row per completed run (the "memory")
-│   │   ├── tracing.py         # LangSmith wiring
-│   │   └── main.py            # FastAPI: POST /runs, POST /runs/{id}/respond, GET /runs/{id}
-│   ├── scripts/
-│   │   ├── run_local.py       # one full run, end to end, no network
-│   │   └── demo_rescope_cap.py# drives 2 rescopes + refused 3rd + direct-edit takeover
-│   └── tests/test_rescope_cap.py
-├── frontend/                  # React + Vite, 3 plain screens (topic → review → map)
-├── supabase/migrations/0001_run_log.sql
-└── docs/OPEN_DECISIONS.md     # the brief's open decisions + my take on each
+backend/app/         state schema, graph, six nodes, llm/search/sources, FastAPI
+backend/scripts/     run_local.py, demo_rescope_cap.py
+backend/tests/
+frontend/            React + Vite — topic input → proposal review → map
+supabase/migrations/ run-log table
+docs/PRD.md          product spec
 ```
-
-## Run it (offline, no keys)
-
-```bash
-cd market-map-agent
-python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-
-# one full run, printed as a nested list + the run-log row
-.venv/bin/python -m backend.scripts.run_local "AI observability"
-
-# the rescope cap, driven end to end
-.venv/bin/python -m backend.scripts.demo_rescope_cap
-
-# the cap logic under test
-.venv/bin/python -m pytest backend/tests -q
-```
-
-`"AI observability"` has a hand-written fixture (5 layers, real company names,
-one rejection of each kind). Any other topic gets a generic skeleton in stub
-mode — run with real keys for substance.
-
-## Run it for real
-
-Copy `.env.example` → `.env`, fill in keys, set `USE_STUBS=false`.
-
-| Key | Used for |
-|---|---|
-| `ANTHROPIC_API_KEY` | Propose + Synthesize (judgment model), recon queries + one-liners (mechanical model) |
-| `EXA_API_KEY` | recon search, per-layer company discovery, URL resolution |
-| `LANGSMITH_API_KEY` | tracing — every node call + every LLM/Exa call, with cost/latency/tokens |
-| `DATABASE_URL` | Supabase Postgres: `market_map_runs` table **and** the LangGraph checkpointer |
-
-If `ANTHROPIC_API_KEY` or `EXA_API_KEY` is missing the app silently falls back to
-stubs (see `Settings.stubs_enabled`).
-
-```bash
-# apply the run-log migration (checkpointer tables are auto-created by PostgresSaver.setup())
-psql "$DATABASE_URL" -f supabase/migrations/0001_run_log.sql
-
-.venv/bin/uvicorn backend.app.main:app --reload      # :8000
-cd frontend && npm install && npm run dev            # :5173, proxies /api -> :8000
-```
-
-## The loop
-
-`START → recon → propose → confirm ─┐`
-`                                   ├─ rescope (reuse recon) → propose`
-`                                   ├─ rescope + "different topic" → recon`
-`                                   └─ confirm / direct_edit → execute → verify → synthesize → END`
-
-- **confirm** is a real durable pause — `interrupt()` suspends, `Command(resume=...)`
-  continues. State survives a process restart via the checkpointer.
-- **Rescope cap** (`RESCOPE_CAP`, default 2): after 2 rescope requests the agent
-  refuses a 3rd automated pass, flips to direct-edit-only on the last proposal,
-  and states why. The cap and remaining count are in the payload of the very
-  first proposal, not discovered on hitting it.
-- **Corroboration** is tier-weighted (`sources.assess_sources`): tier-1 = 2.0,
-  tier-2 = 1.5, tier-3 = 1.0 per distinct independent source; a company must clear
-  `CORROBORATION_THRESHOLD` (default 3.0) **and** have ≥ 2 sources. Company-owned
-  pages and PR wires are "existence-only"; aggregators are excluded; near-identical
-  headlines across hosts count once (syndication). Recon names the tier-1..3
-  outlets for the topic (`state.credible_outlets`); the host lists in `sources.py`
-  are only a backstop.
-  - No tier-1..3 source → **rejected** (`failed_corroboration`).
-  - Has sources but below threshold → **kept, flagged `under_corroborated`** →
-    lands in `final_output.needs_review` for a human to rescue, not on the map.
-- **Verify** does two separate checks: URL actually resolves (no fabricated URLs)
-  + the grounded one-liner fits the layer's confirmed definition. Every rejection
-  is carried into `final_output.rejected` with a stated reason.
-- **Empty layer** → one broadened-query retry (`search.reformulate_query`) before
-  it's marked `no_results`; the retry is flagged in the layer + warnings.
-- **Per-layer volume**: soft target `LAYER_COMPANY_SOFT_TARGET` (12), hard cap
-  `LAYER_COMPANY_HARD_CAP` (25). Over the hard cap → list truncated (best-
-  corroborated kept) **and** a "layer too broad — consider splitting" warning.
-- **Rescope-note gate**: a thin rescope note triggers one free clarification
-  question (a 2nd `interrupt()` in `confirm`) that does **not** spend an attempt.
-  The client also nudges ("this looks like a direct edit you can do for free").
-
-## Deviations from the draft state schema
-
-All additive, all noted in `state.py`:
-
-1. `proposal.layer_definitions: {layer -> sentence}` — Verify's category-fit check
-   needs each layer's stated definition; the draft only had layer names.
-2. `proposal.notes: str` — Propose's honest caveat when recon is thin/contradictory
-   (the brief asks for this behaviour).
-3. `user_edit.edited_scope` — somewhere for a direct edit's payload to live.
-4. Bookkeeping: `propose_attempts`, `cap_hit`, `force_direct_edit`,
-   `handoff_message`, `run_id`, `metrics`.
-5. `LayerResult.status` (`ok` / `no_results` / `no_verified_companies`) +
-   `final_output.warnings` — honest handling of empty layers.
-6. `Company.corroboration {status, score, tiers, detail}` + `final_output.needs_review`
-   — tier-weighted corroboration and the under-corroborated review queue.
-7. `state.credible_outlets` — Recon-identified tier-1..3 outlets for the topic.
-8. `state.layer_meta` — per-layer `raw_count` / `reformulated` / `over_cap`.
-9. `user_edit.normalize` — direct-edit flag for the one-pass name/order tidy.
-
-## Iteration log — edits a–g (agreed with the brief owner)
-
-| | Change | Where |
-|---|---|---|
-| a | One-liner prompt: 12–25 words, lead with the layer function, ban marketing verbs, ground every claim | `llm.company_one_liner` |
-| b | Recon names the tier-1..3 outlets for the topic; static lists are a backstop; syndication independence check | `nodes/recon.py`, `llm.credible_outlets`, `sources.assess_sources` |
-| c | Tier-weighted corroboration (2.0 / 1.5 / 1.0, threshold 3.0) + `needs_review` bucket instead of a hard drop | `sources.assess_sources`, `nodes/execute.py`, `nodes/synthesize.py` |
-| d | One broadened-query retry before a layer is `no_results` | `search.reformulate_query`, `search.find_company_sources` |
-| e | "Add layer" + editable definitions + "normalize my edits" (one cheap pass, not a rescope) | `frontend/src/App.jsx`, `llm.normalize_scope`, `nodes/confirm.py` |
-| f | Thin rescope note → one free clarification round (no attempt spent) + client "did you mean a direct edit?" nudge | `nodes/confirm.py`, `frontend/src/App.jsx` |
-| g | Drop-layer → "widen a sibling" prompt; per-layer soft target + hard cap with "too broad" warning | `frontend/src/App.jsx`, `nodes/execute.py`, `nodes/synthesize.py` |
-
-## Not built yet (deliberately)
-
-Real LLM prompt bodies are written to the right spec but untuned (no few-shot
-examples, no eval loop yet). Parallel per-layer research uses a thread pool;
-promoting it to LangGraph `Send` fan-out (for per-layer tracing/checkpointing) is
-noted in `execute.py`. Run-log cost/tokens are `null` in stub mode — backfill
-from LangSmith by `run_id` is the plan. Frontend is unstyled-minimal, not run
-through `npm install` here. No deploy config.
