@@ -1,0 +1,40 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 32px 20px 80px; }
+h1 { font-size: 22px; }
+input, select, textarea, button { font: inherit; }
+input[type="text"], input:not([type]), select, textarea {
+  width: 100%; padding: 8px; margin-top: 4px; border: 1px solid #8886; border-radius: 6px; background: transparent;
+}
+textarea { min-height: 80px; }
+label { display: block; margin: 12px 0; font-weight: 600; }
+button { padding: 8px 14px; margin: 6px 6px 0 0; border: 1px solid #8886; border-radius: 6px; cursor: pointer; background: #8881; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+ol li { margin-bottom: 14px; }
+.def, .src { font-weight: 400; opacity: 0.7; font-size: 13px; }
+.cap { opacity: 0.75; font-size: 13px; }
+.notes { background: #ffcc0022; padding: 8px 12px; border-radius: 6px; }
+.error { background: #ff000018; color: #b00; padding: 10px; border-radius: 6px; white-space: pre-wrap; }
+.cols { display: flex; gap: 24px; }
+.cols > div { flex: 1; }
+.actions { margin: 20px 0; }
+.rescope { border-top: 1px dashed #8886; margin-top: 24px; padding-top: 12px; }
+.check { font-weight: 400; }
+.check input { width: auto; margin-right: 6px; }
+.layer { border-top: 1px solid #8883; padding-top: 8px; margin-top: 16px; }
+.status { font-size: 11px; padding: 2px 6px; border-radius: 10px; background: #8882; text-transform: uppercase; }
+.status.ok { background: #22c55e33; }
+.status.no_results, .status.no_verified_companies { background: #f9731633; }
+.warnings { background: #f973161a; padding: 8px 12px; border-radius: 6px; }
+.rejected, .review-queue { margin-top: 24px; opacity: 0.9; }
+.review-queue { border-top: 1px dashed #8886; padding-top: 12px; }
+.defedit { min-height: 40px; margin-top: 4px; font-size: 13px; }
+.addlayer { display: flex; gap: 8px; margin: 12px 0; }
+.addlayer input { flex: 1; }
+.widen { background: #8881; padding: 8px 12px; border-radius: 6px; margin: 8px 0; font-size: 13px; }
+.widen select { width: auto; margin-left: 8px; }
+.hint { font-size: 13px; opacity: 0.8; background: #38bdf81a; padding: 6px 10px; border-radius: 6px; }
+.tiers { font-weight: 600; opacity: 0.9; margin-right: 4px; }
+.badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #38bdf833; margin-left: 6px; text-transform: uppercase; }
+.badge.warn { background: #f9731633; }
