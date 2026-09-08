@@ -187,8 +187,11 @@ def extract_companies(
             f"Search results:\n{snippets}\n\n"
             f"Extract up to {cap} distinct companies that plausibly belong in this "
             "layer. For each, give its primary/official URL (the company's own "
-            "site, not the article about it) only if stated or clearly inferable "
-            "from the text, else null — do not guess a URL.\n"
+            "site, not the article about it). Use the URL from the text if it's "
+            "there; for a well-known company you're confident you know the real "
+            "domain of even if it isn't in the text, supply it from your own "
+            "knowledge. Only use null when you aren't reasonably confident of the "
+            "actual domain — never fabricate one for an obscure or ambiguous name.\n"
             'JSON: {"companies": [{"name": str, "url": str|null}, ...]}.'
         ),
     )

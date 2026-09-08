@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
 from langsmith import traceable
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from . import llm, stubs
 from .config import Settings, get_settings
@@ -22,14 +23,35 @@ def _exa(settings: Settings):
     return _exa_cache["e"]
 
 
+def _is_rate_limit(exc: BaseException) -> bool:
+    # exa_py raises a bare ValueError for every non-2xx response; the status
+    # code/tag are only in the message, not a distinct exception type.
+    msg = str(exc).upper()
+    return "429" in msg or "RATE_LIMIT" in msg
+
+
+@retry(
+    retry=retry_if_exception(_is_rate_limit),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=1, max=20),
+    reraise=True,
+)
+def _exa_search_and_contents(settings: Settings, query: str, *, num_results: int):
+    # Real Execute fans out per-layer AND per-company concurrently (see
+    # execute.py / find_company_sources' ThreadPoolExecutors), which can burst
+    # well past Exa's per-second rate limit even at modest worker counts.
+    # Retry-with-backoff absorbs that instead of crashing the whole run.
+    return _exa(settings).search_and_contents(
+        query, num_results=num_results, type="auto", text={"max_characters": 1200}
+    )
+
+
 @traceable(run_type="retriever", name="exa.web_search")
 def web_search(query: str, *, num_results: int = 8, settings: Optional[Settings] = None) -> List[dict]:
     settings = settings or get_settings()
     if settings.stubs_enabled:
         return stubs.web_search(query, num_results=num_results)
-    res = _exa(settings).search_and_contents(
-        query, num_results=num_results, type="auto", text={"max_characters": 1200}
-    )
+    res = _exa_search_and_contents(settings, query, num_results=num_results)
     return [
         {
             "title": r.title,
@@ -150,6 +172,17 @@ def find_company_sources(
     return {"candidates": candidates, "reformulated": reformulated}
 
 
+# Real, bot-protected company sites (Cloudflare and similar WAFs) 403 the
+# default httpx client outright — no browser-shaped User-Agent, no admission.
+# Without this, a genuinely real company like openai.com fails "existence".
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    )
+}
+
+
 @traceable(name="exa.resolve_url")
 def resolve_url(url: str, *, settings: Optional[Settings] = None) -> dict:
     """{resolves: bool, final_url: str, status: int} — used by Verify for the
@@ -161,9 +194,9 @@ def resolve_url(url: str, *, settings: Optional[Settings] = None) -> dict:
     import httpx
 
     try:
-        r = httpx.head(url, follow_redirects=True, timeout=8.0)
+        r = httpx.head(url, headers=_BROWSER_HEADERS, follow_redirects=True, timeout=8.0)
         if r.status_code >= 400 or r.status_code == 405:
-            r = httpx.get(url, follow_redirects=True, timeout=10.0)
+            r = httpx.get(url, headers=_BROWSER_HEADERS, follow_redirects=True, timeout=10.0)
         return {"resolves": r.status_code < 400, "final_url": str(r.url), "status": r.status_code}
     except Exception as exc:  # noqa: BLE001
         return {"resolves": False, "final_url": url, "status": 0, "error": str(exc)}
