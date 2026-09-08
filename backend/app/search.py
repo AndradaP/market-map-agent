@@ -3,11 +3,12 @@ Stub fallbacks keep the graph runnable offline.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
 from langsmith import traceable
 
-from . import stubs
+from . import llm, stubs
 from .config import Settings, get_settings
 
 _exa_cache = {}
@@ -49,17 +50,34 @@ def reformulate_query(query: str) -> str:
     return f"{q.strip()} vendors OR suppliers OR startups OR providers"
 
 
-def _group_hits_to_candidates(hits: List[dict]) -> List[dict]:
-    from .utils import host_of
+def _mentions(hit: dict, name: str) -> bool:
+    """Cheap check: does this hit's own title actually name the company? Used to
+    credit the hit that surfaced a company as one of its sources too, on top of
+    the dedicated corroboration search below."""
+    return bool(name.strip()) and name.strip().lower() in (hit.get("title") or "").lower()
 
-    grouped: dict = {}
-    for h in hits:
-        host = host_of(h["url"])
-        if not host:
-            continue
-        grouped.setdefault(host, {"name": host, "url": f"https://{host}", "sources": []})
-        grouped[host]["sources"].append({"url": h["url"], "title": h.get("title", "")})
-    return [g for g in grouped.values() if g["sources"]]
+
+def _dedupe_by_url(*groups: List[dict]) -> List[dict]:
+    seen = set()
+    out: List[dict] = []
+    for g in groups:
+        for s in g:
+            u = s.get("url") if isinstance(s, dict) else s
+            if u and u not in seen:
+                seen.add(u)
+                out.append(s)
+    return out
+
+
+@traceable(run_type="retriever", name="exa.corroborate_company")
+def corroborate_company(
+    name: str, topic: str, *, num_results: int, settings: Optional[Settings] = None
+) -> List[dict]:
+    """Independent search for one already-extracted company — this is what makes
+    corroboration real: sources that cover the company on their own, not sources
+    that merely happened to share a search hit with it."""
+    hits = web_search(f'"{name}" {topic}', num_results=num_results, settings=settings)
+    return [{"url": h["url"], "title": h.get("title", "")} for h in hits]
 
 
 @traceable(run_type="retriever", name="exa.find_company_sources")
@@ -70,6 +88,11 @@ def find_company_sources(
 
     If the first search comes back empty, the query is reformulated once and
     retried before the layer is declared empty (edit d).
+
+    Real path: search the layer -> LLM-extract a deduped company list from ALL
+    hits together (a hit can name several companies; a company can recur across
+    hits) -> one independent corroboration search per company, run in parallel,
+    plus credit for whichever original hit(s) actually named it.
     """
     settings = settings or get_settings()
 
@@ -80,16 +103,51 @@ def find_company_sources(
         cands = stubs.company_candidates(topic, layer, definition, attempt=2)
         return {"candidates": cands, "reformulated": True}
 
-    # Real path (skeleton): search, group hits by domain as naive "candidates".
-    # Production would add an LLM extraction pass to pull real company names + URLs,
-    # then re-search each name for corroboration.
     q = f'"{topic}" "{layer}" companies vendors players'
     hits = web_search(q, num_results=15, settings=settings)
     reformulated = False
     if not hits:
         hits = web_search(reformulate_query(q), num_results=15, settings=settings)
         reformulated = True
-    return {"candidates": _group_hits_to_candidates(hits), "reformulated": reformulated}
+    if not hits:
+        return {"candidates": [], "reformulated": reformulated}
+
+    extracted = llm.extract_companies(
+        hits,
+        topic=topic,
+        layer=layer,
+        definition=definition,
+        cap=settings.layer_extract_cap,
+        settings=settings,
+    )
+    if not extracted:
+        return {"candidates": [], "reformulated": reformulated}
+
+    with ThreadPoolExecutor(max_workers=min(settings.company_corroboration_workers, len(extracted))) as pool:
+        future_to_company = {
+            pool.submit(
+                corroborate_company,
+                c["name"],
+                topic,
+                num_results=settings.company_corroboration_results,
+                settings=settings,
+            ): c
+            for c in extracted
+        }
+        candidates = []
+        for fut, c in future_to_company.items():
+            origin_sources = [
+                {"url": h["url"], "title": h.get("title", "")} for h in hits if _mentions(h, c["name"])
+            ]
+            candidates.append(
+                {
+                    "name": c["name"],
+                    "url": c["url"],
+                    "sources": _dedupe_by_url(origin_sources, fut.result()),
+                }
+            )
+
+    return {"candidates": candidates, "reformulated": reformulated}
 
 
 @traceable(name="exa.resolve_url")

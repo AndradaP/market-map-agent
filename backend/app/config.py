@@ -16,6 +16,11 @@ class Settings(BaseSettings):
 
     # LLM
     anthropic_api_key: Optional[str] = None
+    # Only needed for an org-level (unscoped) key on a multi-workspace account —
+    # sent as the `anthropic-workspace-id` header. Leave blank for a
+    # workspace-scoped key (the normal case).
+    anthropic_workspace_id: Optional[str] = None
+    anthropic_base_url: Optional[str] = None  # defaults to the real API
     anthropic_model_judgment: str = "claude-opus-5"
     anthropic_model_mechanical: str = "claude-sonnet-5"
 
@@ -41,6 +46,13 @@ class Settings(BaseSettings):
     # ceiling that truncates AND emits a "layer too broad" warning.
     layer_company_soft_target: int = 12
     layer_company_hard_cap: int = 25
+
+    # Execute pipeline (real path): how many companies to extract per layer, how
+    # many Exa results per per-company corroboration search, and the parallelism
+    # of those searches within a layer.
+    layer_extract_cap: int = 15
+    company_corroboration_results: int = 8
+    company_corroboration_workers: int = 4
 
     # Rescope-note quality floor (chars) before the one free clarification round.
     rescope_min_note_chars: int = 15

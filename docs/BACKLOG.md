@@ -40,10 +40,16 @@ Not for `main`. Tracks what's done and what's next. Pairs with
 
 ### M1 — real pipeline  *(do roughly in order)*
 - [ ] Get keys: Anthropic, Exa, LangSmith. Confirm a real run shows up in LangSmith with cost/latency.
-- [ ] **Real Execute path.** `search.find_company_sources`'s live branch currently
-      just groups search hits by domain — no real company extraction. Replace
-      with: search → LLM extraction pass (company name + primary URL from the
-      results) → re-search each name for corroboration.
+- [x] **Real Execute path.** `search.find_company_sources`'s live branch used to
+      just group search hits by domain. Now: search → `llm.extract_companies`
+      (one call over all hits together, so one hit naming several companies and
+      one company recurring across hits both get deduped in a single pass) →
+      one independent `search.corroborate_company` search per extracted name,
+      run in parallel (`company_corroboration_workers`), plus credit for
+      whichever original hit(s) actually named the company
+      (`layer_extract_cap`, `company_corroboration_results` in `config.py`).
+      Untested against a live key yet — orchestration covered by monkeypatched
+      unit tests (`test_execute_real_path.py`); real-key smoke test still open.
 - [ ] Prompt tuning, in this order: Propose (scope quality is the point) → company
       one-liners → category-fit → layer explanations. Add few-shot examples.
 - [ ] First 5–10 real runs across broad + niche topics; eyeball output quality;

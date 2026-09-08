@@ -25,7 +25,15 @@ def _client(settings: Settings):
     if "c" not in _client_cache:
         from anthropic import Anthropic
 
-        _client_cache["c"] = Anthropic(api_key=settings.anthropic_api_key)
+        kwargs = {"api_key": settings.anthropic_api_key}
+        # Pin the real API unless explicitly overridden, so an ambient
+        # ANTHROPIC_BASE_URL (e.g. a proxy) can't misroute the standalone agent.
+        kwargs["base_url"] = settings.anthropic_base_url or "https://api.anthropic.com"
+        if settings.anthropic_workspace_id:
+            kwargs["default_headers"] = {
+                "anthropic-workspace-id": settings.anthropic_workspace_id
+            }
+        _client_cache["c"] = Anthropic(**kwargs)
     return _client_cache["c"]
 
 
@@ -136,6 +144,66 @@ def draft_proposal(
             "open_questions (list[str], <=3, each a direct standalone question), notes (str)."
         ),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Execute: company extraction  (mechanical model)
+# --------------------------------------------------------------------------- #
+@traceable(run_type="llm", name="claude.extract_companies")
+def extract_companies(
+    hits: List[dict],
+    *,
+    topic: str,
+    layer: str,
+    definition: str,
+    cap: int,
+    settings: Optional[Settings] = None,
+) -> List[dict]:
+    """Pull real, named companies + primary URLs out of a batch of search hits.
+
+    One call over ALL hits together, not one per hit: a single hit (a "top 10"
+    roundup) often names several companies, and the same company often recurs
+    across hits — the model dedupes both directions in one pass instead of us
+    fuzzy-matching names afterwards. No stub fallback: find_company_sources
+    short-circuits to the stub fixtures before this is ever called.
+    """
+    settings = settings or get_settings()
+    snippets = "\n".join(
+        f"- {h.get('title','')}: {h.get('text','')[:500]} ({h.get('url','')})" for h in hits
+    )
+    out = _json_call(
+        settings,
+        model=settings.anthropic_model_mechanical,
+        system=(
+            "You extract real, named companies/products/projects from web search "
+            "results, for one layer of a value-chain market map. Only extract "
+            "entities actually named in the text — never invent one. Merge repeat "
+            "mentions of the same company into a single entry. Skip generic "
+            "mentions with no identifiable name, and skip the outlet/publication "
+            "itself (e.g. don't extract 'TechCrunch' from a TechCrunch article)."
+        ),
+        user=(
+            f"Topic: {topic!r}\nLayer: {layer!r}\nLayer definition: {definition!r}\n\n"
+            f"Search results:\n{snippets}\n\n"
+            f"Extract up to {cap} distinct companies that plausibly belong in this "
+            "layer. For each, give its primary/official URL (the company's own "
+            "site, not the article about it) only if stated or clearly inferable "
+            "from the text, else null — do not guess a URL.\n"
+            'JSON: {"companies": [{"name": str, "url": str|null}, ...]}.'
+        ),
+    )
+    seen = set()
+    result: List[dict] = []
+    for c in out.get("companies", []):
+        name = (c.get("name") or "").strip()
+        key = name.lower()
+        if not name or key in seen:
+            continue
+        seen.add(key)
+        result.append({"name": name, "url": (c.get("url") or "").strip()})
+        if len(result) >= cap:
+            break
+    return result
 
 
 # --------------------------------------------------------------------------- #
