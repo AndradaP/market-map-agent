@@ -43,9 +43,12 @@ class UserEdit(TypedDict, total=False):
 
 
 class Corroboration(TypedDict, total=False):
+    # corroborated = >=2 independent non-junk sources, regardless of tier;
+    # under_corroborated = exactly 1; uncorroborated = 0. See sources.py.
     status: Literal["corroborated", "under_corroborated", "uncorroborated"]
-    score: float          # tier-weighted sum over distinct independent sources
-    tiers: List[str]      # distinct tiers present, e.g. ["tier1", "tier3"]
+    independent_hosts: List[str]  # the distinct hosts that counted toward status
+    score: float          # tier-weighted sum -- display only, doesn't gate status
+    tiers: List[str]      # distinct tier1-3 tiers present, e.g. ["tier1"] -- for a "featured in" badge
     detail: str
 
 

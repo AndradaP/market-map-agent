@@ -1,9 +1,7 @@
-"""Source-credibility tiering + the two-source corroboration rule.
-
-This is the brief's typology turned into code. It is deliberately a *definition*
-plus heuristics, not a per-vertical name list: Recon is expected to hand in the
-vertical-specific tier-1..3 outlets it discovers (``extra_by_tier``), and those
-are merged on top of the generic defaults below.
+"""Source-credibility tiering (for display) + the two-independent-source rule
+(for the actual corroboration gate — see assess_sources()'s docstring for why
+gating on domain count rather than a curated "credible outlets" tier is the
+deliberate design after live testing across several fields).
 """
 from __future__ import annotations
 
@@ -89,7 +87,13 @@ def classify(url: str, *, company_host: Optional[str] = None,
 
 
 CORROBORATING = {"tier1", "tier2", "tier3"}
-TIER_WEIGHTS = {"tier1": 2.0, "tier2": 1.5, "tier3": 1.0}
+TIER_WEIGHTS = {"tier1": 2.0, "tier2": 1.5, "tier3": 1.0, "unknown": 0.0}
+# Junk: never counts as a source, no matter how many of them pile up. Anything
+# NOT in this set — including "unknown" — counts as one real, independent
+# mention. A hand-curated allowlist of "credible" hosts can't keep up across
+# arbitrarily different fields (chemistry vs. AI infra vs. CPG); a short,
+# universal junk list is far easier to maintain than an infinite good list.
+NON_COUNTING = {"existence_only", "excluded"}
 
 
 def _title_tokens(t: str) -> set:
@@ -109,28 +113,36 @@ def assess_sources(
     *,
     company_host: Optional[str] = None,
     extra_by_tier: Optional[Dict[str, Sequence[str]]] = None,
-    threshold: float = 3.0,
 ) -> dict:
-    """Tier-weighted corroboration over a company's sources.
+    """Independent-source-count corroboration over a company's sources.
 
     ``source_meta``: ``[{"url": str, "title": str}, ...]``.
 
-    Independence: one contribution per distinct host (best tier wins), and
-    near-duplicate headlines across hosts are treated as a single syndicated
-    story (the lower tier is dropped).
+    The gate is deliberately simple: >=2 distinct, non-junk domains mentioning
+    the company independently is enough, regardless of what kind of sites they
+    are. "Junk" is existence-only (the company's own domain, PR wires, code/
+    package hosts) and known low-signal aggregators (see EXCLUDED_HOSTS) —
+    that list is short and holds across any field. A allowlist of "credible"
+    outlets does not: chemistry, CPG and AI infra don't share a press corps,
+    and a niche newsletter or a YC/VC portfolio page is a real, independent
+    mention even with no hand-curated tier attached to it. Tier data (tier1-3)
+    is still computed and returned for display (e.g. a "featured in TechCrunch"
+    badge) but no longer gates anything.
 
-    Returns ``{status, score, tiers, independent_hosts, detail}`` where status is
-    ``corroborated`` (score >= threshold and >= 2 independent sources),
-    ``under_corroborated`` (>= 1 tier1-3 source but bar not met), or
-    ``uncorroborated`` (no tier1-3 source at all).
+    Independence: one contribution per distinct host (best tier wins for
+    display purposes), and near-duplicate headlines across hosts are treated
+    as a single syndicated story, not two independent sources.
+
+    Returns ``{status, score, tiers, independent_hosts, detail}`` where status
+    is ``corroborated`` (>= 2 independent non-junk sources), ``under_corroborated``
+    (exactly 1), or ``uncorroborated`` (0).
     """
-    # best tier per host
     by_host: Dict[str, dict] = {}
     for s in source_meta:
         url = s.get("url", "") if isinstance(s, dict) else str(s)
         title = s.get("title", "") if isinstance(s, dict) else ""
         tier = classify(url, company_host=company_host, extra_by_tier=extra_by_tier)
-        if tier not in CORROBORATING:
+        if tier in NON_COUNTING:
             continue
         h = host_of(url)
         if not h:
@@ -139,7 +151,7 @@ def assess_sources(
         if cur is None or TIER_WEIGHTS[tier] > TIER_WEIGHTS[cur["tier"]]:
             by_host[h] = {"tier": tier, "title": title, "url": url}
 
-    # drop syndicated duplicates (keep the higher tier)
+    # drop syndicated duplicates (keep the higher tier when there's a tie-break)
     kept: List[dict] = []
     for entry in sorted(by_host.values(), key=lambda e: -TIER_WEIGHTS[e["tier"]]):
         if any(_same_story(entry["title"], k["title"]) for k in kept):
@@ -147,25 +159,23 @@ def assess_sources(
         kept.append(entry)
 
     score = round(sum(TIER_WEIGHTS[e["tier"]] for e in kept), 2)
-    tiers = sorted({e["tier"] for e in kept})
+    tiers = sorted({e["tier"] for e in kept if e["tier"] in CORROBORATING})
     hosts = [host_of(e["url"]) for e in kept]
 
-    if score >= threshold and len(kept) >= 2:
+    if len(kept) >= 2:
         status = "corroborated"
-    elif len(kept) >= 1:
+    elif len(kept) == 1:
         status = "under_corroborated"
     else:
         status = "uncorroborated"
 
     if status == "corroborated":
-        detail = f"score {score} across {', '.join(tiers)} ({', '.join(hosts)})"
+        badge = f", featured in {', '.join(tiers)}" if tiers else ""
+        detail = f"{len(kept)} independent sources ({', '.join(hosts)}){badge}"
     elif status == "under_corroborated":
-        detail = (
-            f"score {score} (want >= {threshold}); {len(kept)} independent tier1-3 "
-            f"source(s): {', '.join(hosts)}"
-        )
+        detail = f"only 1 independent source so far: {hosts[0]}"
     else:
-        detail = "no independent tier1-3 sources (existence-only and aggregators do not count)"
+        detail = "no independent sources (existence-only and aggregators do not count)"
 
     return {
         "status": status,

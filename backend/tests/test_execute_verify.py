@@ -41,9 +41,19 @@ def test_sparse_layer_is_recovered_by_reformulation():
 def test_under_corroborated_company_goes_to_review_queue_not_the_map():
     final = _run()["final_output"]
     review_names = {c["name"] for c in final["needs_review"]}
-    assert "Langfuse" in review_names  # 1 tier-3 source + existence-only -> under-corroborated
+    assert "PromptEval" in review_names  # exactly 1 independent source -> under-corroborated
     on_map = {c["name"] for layer in final["layers"] for c in layer["companies"]}
-    assert "Langfuse" not in on_map
+    assert "PromptEval" not in on_map
+
+
+def test_uncurated_outlet_still_counts_as_real_independent_coverage():
+    # Langfuse's sources are one tier-3 host (ycombinator.com) plus one host on
+    # no curated list at all (heavybit.com) -- under the old tier-allowlist
+    # model that second source counted for nothing; under the count-based rule
+    # it's a second genuine independent mention, so Langfuse clears the bar.
+    final = _run()["final_output"]
+    on_map = {c["name"] for layer in final["layers"] for c in layer["companies"]}
+    assert "Langfuse" in on_map
 
 
 def test_corroborated_companies_carry_tier_spread():

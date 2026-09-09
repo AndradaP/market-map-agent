@@ -1,12 +1,13 @@
 """Node 4 — Execute. Per-layer company research, parallelised across layers.
 
-Output per layer: candidate companies (name / URL / sources / tier-weighted
-corroboration), plus meta (raw count, whether the query was reformulated,
-whether the hard cap truncated the list).
+Output per layer: candidate companies (name / URL / sources / corroboration),
+plus meta (raw count, whether the query was reformulated, whether the hard cap
+truncated the list).
 
-Corroboration is tier-weighted here (edit c): a company with no tier1-3 source is
-rejected outright; one that has tier1-3 sources but doesn't clear the threshold is
-kept and flagged ``under_corroborated`` for the human to rescue in Synthesize.
+Corroboration gates on independent source *count*, not a curated credibility
+tier (see sources.assess_sources): a company with zero independent, non-junk
+sources is rejected outright; one with exactly one is kept and flagged
+``under_corroborated`` for the human to rescue in Synthesize.
 """
 from __future__ import annotations
 
@@ -18,13 +19,14 @@ from ..config import get_settings
 from ..state import Company, MarketMapState
 from ..utils import host_of
 
+_STATUS_RANK = {"corroborated": 0, "under_corroborated": 1, "uncorroborated": 2}
+
 
 def _research_layer(
     topic: str,
     layer: str,
     definition: str,
     extra_by_tier: dict,
-    threshold: float,
     hard_cap: int,
 ) -> Tuple[str, Dict[str, Any]]:
     found = search.find_company_sources(layer=layer, topic=topic, definition=definition)
@@ -37,7 +39,6 @@ def _research_layer(
             smeta,
             company_host=host_of(c["url"]),
             extra_by_tier=extra_by_tier,
-            threshold=threshold,
         )
         cand: Company = {
             "name": c["name"],
@@ -48,6 +49,7 @@ def _research_layer(
             "category_fit": False,
             "corroboration": {
                 "status": assessed["status"],
+                "independent_hosts": assessed["independent_hosts"],
                 "score": assessed["score"],
                 "tiers": assessed["tiers"],
                 "detail": assessed["detail"],
@@ -62,8 +64,18 @@ def _research_layer(
         }
         scored.append(cand)
 
-    # Prefer the best-corroborated when a layer overflows the hard cap.
-    scored.sort(key=lambda x: (-x["corroboration"]["score"], x["name"]))
+    # Prefer the best-corroborated when a layer overflows the hard cap: status
+    # first (corroborated beats under-corroborated regardless of tier score),
+    # then independent-source count, then the tier-weighted score as a
+    # display-quality tiebreak among otherwise-equal candidates.
+    scored.sort(
+        key=lambda x: (
+            _STATUS_RANK[x["corroboration"]["status"]],
+            -len(x["corroboration"]["independent_hosts"]),
+            -x["corroboration"]["score"],
+            x["name"],
+        )
+    )
     raw_count = len(scored)
     kept = scored[:hard_cap]
 
@@ -96,7 +108,6 @@ def execute_node(state: MarketMapState) -> dict:
                 layer,
                 defs.get(layer, ""),
                 extra_by_tier,
-                settings.corroboration_threshold,
                 settings.layer_company_hard_cap,
             )
             for layer in layers

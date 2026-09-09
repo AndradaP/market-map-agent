@@ -112,14 +112,23 @@ One user, a web form, no login (v1).
   The static host lists in code are only a backstop.
 
 ### Corroboration
-- Tier-weighted score per distinct **independent** source: tier 1 = 2.0,
-  tier 2 = 1.5, tier 3 = 1.0. Near-identical headlines across hosts (a syndicated
-  wire story) count once.
-- Score ≥ threshold (default 3.0) **and** ≥ 2 independent sources → placed on the
-  map.
-- Has tier 1–3 sources but below the bar → **review queue** — a human promotes or
-  drops it.
-- No tier 1–3 source at all → **rejected**.
+*(Revised post-M1 live testing — see BACKLOG.md. Originally a tier-weighted
+score against a 3.0 threshold; live runs across several topics showed the
+tier allowlist doesn't generalize across fields — chemistry, CPG and AI infra
+don't share a press corps — so the gate is now independent-source **count**,
+not a curated "credible outlet" judgment.)*
+- ≥ 2 distinct, non-junk domains mentioning the company → **corroborated**,
+  placed on the map. Any domain counts, tiered or not — a niche newsletter or
+  a VC portfolio page with no hand-curated tier is still a real, independent
+  mention. Near-identical headlines across hosts (a syndicated wire story)
+  count once, not twice.
+- "Junk" (never counts, at any count): the company's own domain, PR wires,
+  code/package hosts, and known low-signal aggregators — this list is short
+  and holds across any field, unlike a "credible outlets" allowlist.
+- Exactly 1 independent source → **review queue** — a human promotes or drops it.
+- 0 independent sources → **rejected**.
+- Tier data (tier 1/2/3, per the original typology) is still computed and
+  shown as a "featured in ..." display badge — it no longer gates anything.
 
 ### Verification — two separate checks
 - **Existence & identity** — the URL resolves to that company (a plausible but

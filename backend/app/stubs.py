@@ -40,9 +40,13 @@ _DEMOS: Dict[str, dict] = {
             ],
             "notes": "Recon was rich and consistent for this topic; the split below is well-supported.",
         },
-        # Source mixes are chosen to exercise the tier-weighted score (edit c):
-        # verified companies clear the 3.0 threshold with a tier-2 + tier-3 mix;
-        # Langfuse sits at 1.0 (under-corroborated -> review queue).
+        # Source mixes are chosen to exercise the independent-source-count rule
+        # (>=2 non-junk domains -> corroborated, regardless of tier -- see
+        # sources.assess_sources): most companies clear it with 2-3 well-known
+        # outlets; PromptEval sits at exactly 1 (under-corroborated -> review
+        # queue); Langfuse deliberately has one tier-3 source (ycombinator.com)
+        # PLUS one unclassified-but-real one (heavybit.com) to demonstrate that
+        # an uncurated outlet still counts as genuine independent coverage.
         "companies": {
             "Instrumentation & SDKs": [
                 {"name": "OpenTelemetry GenAI", "url": "https://opentelemetry.io/docs/specs/semconv/gen-ai/",
@@ -67,10 +71,16 @@ _DEMOS: Dict[str, dict] = {
                 {"name": "Braintrust", "url": "https://www.braintrust.dev",
                  "sources": ["https://techcrunch.com/braintrust-seed", "https://a16z.com/braintrust-investment",
                              "https://www.wsj.com/tech/braintrust-eval"]},
-                # one tier-3 source + an existence-only page -> score 1.0 -> under-corroborated
+                # ycombinator.com (tier3) + heavybit.com (unclassified, still counts as a
+                # real independent mention) -> 2 independent sources -> corroborated
                 {"name": "Langfuse", "url": "https://langfuse.com",
                  "sources": ["https://ycombinator.com/companies/langfuse", "https://langfuse.com/blog",
                              "https://www.heavybit.com/library/langfuse"]},
+                # exactly one independent source (a niche forum thread, not on any
+                # tier list) -> under-corroborated -> review queue, not the map
+                {"name": "PromptEval", "url": "https://prompteval.dev",
+                 "sources": ["https://prompteval.dev/changelog",
+                             "https://www.reddit.com/r/LocalLLaMA/comments/prompteval_thread"]},
             ],
             "Monitoring, Alerting & Guardrails": [
                 {"name": "Guardrails AI", "url": "https://www.guardrailsai.com",

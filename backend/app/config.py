@@ -38,10 +38,6 @@ class Settings(BaseSettings):
     use_stubs: bool = True
     rescope_cap: int = 2
 
-    # Corroboration: tier-weighted score a company must clear to be "corroborated"
-    # (tier1=2.0, tier2=1.5, tier3=1.0 per distinct independent source — see sources.py).
-    corroboration_threshold: float = 3.0
-
     # Per-layer company volume. Soft target = what Execute aims for; hard cap = the
     # ceiling that truncates AND emits a "layer too broad" warning.
     layer_company_soft_target: int = 12

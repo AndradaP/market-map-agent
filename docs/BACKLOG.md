@@ -24,7 +24,7 @@ Not for `main`. Tracks what's done and what's next. Pairs with
 ### a–g iteration pass
 - [x] **a** — one-liner prompt spec: 12–25 words, lead with the layer function, grounded in retrieved text, ban marketing verbs / the company's own tagline.
 - [x] **b** — Recon names the tier 1–3 outlets for the topic (`state.credible_outlets`); static host lists are a backstop; syndication independence check in `sources.assess_sources`.
-- [x] **c** — tier-weighted corroboration (2.0 / 1.5 / 1.0, threshold `CORROBORATION_THRESHOLD` = 3.0) + `final_output.needs_review` bucket instead of a hard drop.
+- [x] **c** — tier-weighted corroboration (2.0 / 1.5 / 1.0, threshold `CORROBORATION_THRESHOLD` = 3.0) + `final_output.needs_review` bucket instead of a hard drop. *(Superseded in M1 — see "Corroboration model redesign" below; the review-queue bucket and the shape of the rule stayed, the tier-threshold gate itself didn't survive live testing.)*
 - [x] **d** — one broadened-query retry (`search.reformulate_query`) before a layer is `no_results`.
 - [x] **e** — add-layer button + editable layer definitions + optional "normalize my edits" one pass (`user_edit.normalize`, not charged to the cap).
 - [x] **f** — thin rescope note → one free clarification round (2nd `interrupt()` in `confirm`), no attempt spent; client "did you mean a direct edit?" nudge.
@@ -48,12 +48,32 @@ Not for `main`. Tracks what's done and what's next. Pairs with
       run in parallel (`company_corroboration_workers`), plus credit for
       whichever original hit(s) actually named the company
       (`layer_extract_cap`, `company_corroboration_results` in `config.py`).
-      Untested against a live key yet — orchestration covered by monkeypatched
-      unit tests (`test_execute_real_path.py`); real-key smoke test still open.
+- [x] **Real-key smoke tests.** Ran against live Anthropic + Exa keys across
+      several topics; found and fixed 4 real bugs along the way: Exa 429s
+      uncaught under nested layer×company concurrency (now retried with
+      backoff), `extract_companies` omitting well-known companies' URLs,
+      `resolve_url` getting 403'd by bot-protection with no browser
+      User-Agent, and `draft_proposal` responses sometimes missing a required
+      key with no default.
+- [x] **Corroboration model redesign.** Live runs across 3+ topics showed
+      *nothing* ever scored above 2.0 against the old tier-weighted 3.0
+      threshold, and digging in showed the real bottleneck was the curated
+      "credible outlets" tier list itself — it doesn't generalize across
+      fields (chemistry vs. CPG vs. AI infra don't share a press corps), and
+      recon-supplied per-topic outlets could be wrong (`github.com` got named
+      tier-3 for a dev-tools topic). Replaced the tier-threshold gate with a
+      simple independent-*source-count* rule (`sources.assess_sources`): ≥2
+      distinct non-junk domains = corroborated, regardless of tier. Junk
+      (never counts) is a short, field-agnostic list — the company's own
+      domain, PR wires, code/package hosts, known low-signal aggregators.
+      Tier data is kept as a display-only "featured in ..." badge. See
+      `docs/PRD.md`'s Corroboration section for the full rationale.
+- [ ] **Diagnostic batch against the new model** — run geothermal, AEO/GEO,
+      neo-cloud, AI-native GTM, AI/LLM security, and AI infra to see how the
+      count-based rule and Recon's per-topic outlet discovery hold up across
+      genuinely different fields before tuning further.
 - [ ] Prompt tuning, in this order: Propose (scope quality is the point) → company
       one-liners → category-fit → layer explanations. Add few-shot examples.
-- [ ] First 5–10 real runs across broad + niche topics; eyeball output quality;
-      capture failure modes.
 - [ ] Decide open question #1 (structured clarifying questions vs strings) once
       there are real proposals to look at.
 
