@@ -102,6 +102,36 @@ def test_extraction_is_called_with_the_configured_cap(monkeypatch):
     assert out == {"candidates": [], "reformulated": False}
 
 
+def test_plausibility_check_downgrades_a_flagged_company(monkeypatch):
+    from backend.app.nodes.execute import _research_layer
+
+    monkeypatch.setattr(search, "web_search", lambda q, **kw: _roundup("Acme", "Spammy"))
+    monkeypatch.setattr(
+        llm,
+        "extract_companies",
+        lambda hits, **kw: [
+            {"name": "Acme", "url": "https://acme.com"},
+            {"name": "Spammy", "url": "https://spammy.example"},
+        ],
+    )
+    # both get 2 independent (unknown-tier) sources -> both clear the mechanical gate
+    monkeypatch.setattr(
+        search,
+        "corroborate_company",
+        lambda name, topic, **kw: [{"url": f"https://real-outlet.example/{name}", "title": name}],
+    )
+    # plausibility check flags "Spammy" as a content-farm swarm, leaves Acme alone
+    monkeypatch.setattr(
+        llm, "plausibility_check", lambda candidates, **kw: {"Acme": True, "Spammy": False}
+    )
+
+    layer, result = _research_layer("T", "L", "D", {}, hard_cap=25, settings=REAL)
+    by_name = {c["name"]: c for c in result["candidates"]}
+    assert by_name["Acme"]["corroboration"]["status"] == "corroborated"
+    assert by_name["Spammy"]["corroboration"]["status"] == "under_corroborated"
+    assert "content-farm" in by_name["Spammy"]["corroboration"]["detail"]
+
+
 def test_corroboration_uses_the_configured_result_count(monkeypatch):
     captured = {}
 

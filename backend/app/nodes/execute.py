@@ -14,8 +14,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Tuple
 
-from .. import search, sources
-from ..config import get_settings
+from .. import llm, search, sources
+from ..config import Settings, get_settings
 from ..state import Company, MarketMapState
 from ..utils import host_of
 
@@ -28,11 +28,15 @@ def _research_layer(
     definition: str,
     extra_by_tier: dict,
     hard_cap: int,
+    settings: Settings,
 ) -> Tuple[str, Dict[str, Any]]:
-    found = search.find_company_sources(layer=layer, topic=topic, definition=definition)
+    found = search.find_company_sources(
+        layer=layer, topic=topic, definition=definition, settings=settings
+    )
     raw = found["candidates"]
 
     scored: List[Company] = []
+    kept_sources_by_name: Dict[str, list] = {}
     for c in raw:
         smeta = c.get("sources", [])
         assessed = sources.assess_sources(
@@ -63,6 +67,29 @@ def _research_layer(
             "_miscategorized": c.get("_miscategorized", False),
         }
         scored.append(cand)
+        kept_sources_by_name[c["name"]] = assessed["kept_sources"]
+
+    # Mechanical count-gate can't tell a real niche newsletter from a swarm of
+    # small, generically-named content-farm sites blogging the same generic
+    # topic (seen live, at real scale, for SEO-adjacent topics). One cheap LLM
+    # sanity pass over just the already-corroborated shortlist -- not every
+    # candidate -- catches that without reintroducing a curated-outlet list.
+    passed = [c for c in scored if c["corroboration"]["status"] == "corroborated"]
+    if passed:
+        verdicts = llm.plausibility_check(
+            [{"name": c["name"], "sources": kept_sources_by_name[c["name"]]} for c in passed],
+            topic=topic,
+            layer=layer,
+            definition=definition,
+            settings=settings,
+        )
+        for c in passed:
+            if not verdicts.get(c["name"], True):
+                c["corroboration"]["status"] = "under_corroborated"
+                c["corroboration"]["detail"] = (
+                    f"{c['corroboration']['detail']} — flagged: sources read as generic "
+                    "content-farm coverage, not substantive independent reporting"
+                )
 
     # Prefer the best-corroborated when a layer overflows the hard cap: status
     # first (corroborated beats under-corroborated regardless of tier score),
@@ -109,6 +136,7 @@ def execute_node(state: MarketMapState) -> dict:
                 defs.get(layer, ""),
                 extra_by_tier,
                 settings.layer_company_hard_cap,
+                settings,
             )
             for layer in layers
         ]

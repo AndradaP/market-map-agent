@@ -220,6 +220,68 @@ def extract_companies(
     return result
 
 
+@traceable(run_type="llm", name="claude.plausibility_check")
+def plausibility_check(
+    candidates: List[dict],
+    *,
+    topic: str,
+    layer: str,
+    definition: str,
+    settings: Optional[Settings] = None,
+) -> dict:
+    """Secondary sanity check on companies that already cleared the mechanical
+    independent-source-count gate (sources.assess_sources). That gate can't
+    tell a real niche newsletter from a swarm of small, generically-named
+    content-farm sites all blogging the same generic topic as SEO filler
+    (seen live: this happened at real scale for SEO-adjacent topics) -- that's
+    a judgment call, not a mechanical one.
+
+    ``candidates``: ``[{"name": str, "sources": [{"url":.., "title":..}, ...]}]``.
+    Returns ``{name: is_plausible}``. Fails OPEN (defaults True) on any error
+    or on any name the model didn't return a verdict for -- this is a bonus
+    quality check on top of the real gate, not itself the gate, so a hiccup
+    here should never bury a company the mechanical rule already accepted.
+    """
+    settings = settings or get_settings()
+    if settings.stubs_enabled or not candidates:
+        return {c["name"]: True for c in candidates}
+
+    listing = "\n".join(
+        f"- {c['name']}: "
+        + "; ".join(f"{s.get('title', '')} ({s.get('url', '')})" for s in c.get("sources", [])[:6])
+        for c in candidates
+    )
+    try:
+        out = _json_call(
+            settings,
+            model=settings.anthropic_model_mechanical,
+            system=(
+                "You sanity-check whether a company's supposed independent source "
+                "coverage looks like genuine third-party reporting or analysis, or "
+                "like generic SEO/content-farm noise: small marketing or SaaS "
+                "sites, listicles, or directories that mention many similar tools "
+                "as filler content rather than substantive coverage of this "
+                "specific company. A niche but real trade newsletter, a VC "
+                "portfolio page, a community write-up, or a specific news item is "
+                "genuine even if the outlet is small or unfamiliar. A cluster of "
+                "generically-named small domains publishing near-identical, "
+                "generic content about the space rather than the company itself "
+                "is not. When genuinely unsure, mark it plausible — this is a "
+                "secondary sanity check, not the primary bar."
+            ),
+            user=(
+                f"Topic: {topic!r}\nLayer: {layer!r} ({definition!r})\n\n"
+                f"Candidates and their corroborating sources:\n{listing}\n\n"
+                'JSON: {"verdicts": [{"name": str, "plausible": bool, "reason": str}, ...]}.'
+            ),
+        )
+    except Exception:  # noqa: BLE001 -- a bonus check failing must not sink the run
+        return {c["name"]: True for c in candidates}
+
+    verdicts = {v.get("name"): bool(v.get("plausible", True)) for v in out.get("verdicts", [])}
+    return {c["name"]: verdicts.get(c["name"], True) for c in candidates}
+
+
 # --------------------------------------------------------------------------- #
 # Verify + Synthesize helpers  (mechanical / judgment)
 # --------------------------------------------------------------------------- #

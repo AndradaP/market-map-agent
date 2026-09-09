@@ -54,12 +54,35 @@ EXCLUDED_HOSTS = {
 Tier = str  # "tier1" | "tier2" | "tier3" | "existence_only" | "excluded" | "unknown"
 
 
+def _host_or_subdomain(h: str, base: str) -> bool:
+    return bool(base) and (h == base or h.endswith("." + base))
+
+
+def _same_registrable_name(h: str, base: str, *, min_len: int = 5) -> bool:
+    """Same brand, different TLD (acme.com / acme.jp / acme.trading are all the
+    company's own presence, not independent coverage) -- without pulling in a
+    full public-suffix-list dependency. Leftmost-label match, gated on length
+    so two unrelated companies don't collide on a short generic word."""
+    if not h or not base:
+        return False
+    hl, bl = h.split(".")[0], base.split(".")[0]
+    return len(hl) >= min_len and hl == bl
+
+
+def _matches_any(h: str, hosts: Sequence[str]) -> bool:
+    """Suffix-aware membership: a subdomain of a listed host (uk.linkedin.com
+    for linkedin.com) still matches, not just an exact string equal."""
+    return any(_host_or_subdomain(h, host_of(x)) for x in hosts)
+
+
 def classify(url: str, *, company_host: Optional[str] = None,
              extra_by_tier: Optional[Dict[str, Sequence[str]]] = None) -> Tier:
     h = host_of(url)
     if not h:
         return "unknown"
-    if company_host and (h == company_host or h.endswith("." + company_host)):
+    if company_host and (
+        _host_or_subdomain(h, company_host) or _same_registrable_name(h, company_host)
+    ):
         return "existence_only"
 
     # Hardcoded non-counting hosts win even over recon-supplied extra_by_tier:
@@ -67,21 +90,21 @@ def classify(url: str, *, company_host: Optional[str] = None,
     # PR wire isn't independent editorial coverage no matter how on-topic it
     # is — e.g. recon calling github.com "tier3" for a dev-tools query would
     # otherwise let a mere repo existing corroborate the company.
-    if h in EXCLUDED_HOSTS:
+    if _matches_any(h, EXCLUDED_HOSTS):
         return "excluded"
-    if h in EXISTENCE_ONLY_HOSTS:
+    if _matches_any(h, EXISTENCE_ONLY_HOSTS):
         return "existence_only"
 
     extra_by_tier = extra_by_tier or {}
     for tier in ("tier1", "tier2", "tier3"):
-        if h in {host_of(x) for x in extra_by_tier.get(tier, [])}:
+        if _matches_any(h, extra_by_tier.get(tier, [])):
             return tier
 
-    if h in TIER1_HOSTS or h.endswith(GOV_SUFFIXES) or h.endswith(EDU_SUFFIXES):
+    if _matches_any(h, TIER1_HOSTS) or h.endswith(GOV_SUFFIXES) or h.endswith(EDU_SUFFIXES):
         return "tier1"
-    if h in TIER2_HOSTS:
+    if _matches_any(h, TIER2_HOSTS):
         return "tier2"
-    if h in TIER3_HOSTS:
+    if _matches_any(h, TIER3_HOSTS):
         return "tier3"
     return "unknown"
 
@@ -106,6 +129,21 @@ def _same_story(a: str, b: str, thr: float = 0.85) -> bool:
     if not ta or not tb:
         return False
     return len(ta & tb) / len(ta | tb) >= thr
+
+
+# A hit against one of these is a security researcher's blocklist flagging the
+# domain as malicious -- the opposite of corroboration. Seen live: a company's
+# own domain turned up in a phishing/malware blocklist feed and was otherwise
+# scored as "corroborated" by two press-looking sources. This overrides
+# everything else regardless of what else was found.
+_THREAT_INTEL_SIGNALS = (
+    "phishing", "malware", "blocklist", "blacklist", "malicious", "threat-intel",
+)
+
+
+def _looks_like_threat_intel(url: str, title: str) -> bool:
+    text = f"{url} {title}".lower()
+    return any(sig in text for sig in _THREAT_INTEL_SIGNALS)
 
 
 def assess_sources(
@@ -137,6 +175,23 @@ def assess_sources(
     is ``corroborated`` (>= 2 independent non-junk sources), ``under_corroborated``
     (exactly 1), or ``uncorroborated`` (0).
     """
+    for s in source_meta:
+        url = s.get("url", "") if isinstance(s, dict) else str(s)
+        title = s.get("title", "") if isinstance(s, dict) else ""
+        if _looks_like_threat_intel(url, title):
+            return {
+                "status": "uncorroborated",
+                "score": 0.0,
+                "tiers": [],
+                "independent_hosts": [],
+                "detail": (
+                    f"flagged: a source ({host_of(url)}) reads like a security "
+                    "threat-intel/blocklist feed, not coverage -- disqualifying "
+                    "regardless of any other sources found"
+                ),
+                "kept_sources": [],
+            }
+
     by_host: Dict[str, dict] = {}
     for s in source_meta:
         url = s.get("url", "") if isinstance(s, dict) else str(s)
@@ -183,4 +238,8 @@ def assess_sources(
         "tiers": tiers,
         "independent_hosts": hosts,
         "detail": detail,
+        # the actual {url, title} entries that counted -- for a downstream
+        # plausibility check to judge (mechanical rules can't tell a real
+        # niche newsletter from a content-farm swarm; that's a judgment call).
+        "kept_sources": [{"url": e["url"], "title": e["title"]} for e in kept],
     }

@@ -96,6 +96,48 @@ def test_recon_supplied_outlets_are_honoured_as_a_display_tier_not_a_gate():
     assert r["tiers"] == ["tier3"]
 
 
+def test_threat_intel_source_hard_vetoes_regardless_of_other_sources():
+    # Seen live: a company's own domain turned up in a phishing blocklist feed
+    # while also having 2 press-looking sources -- the blocklist hit must
+    # disqualify the company outright, not just fail to count.
+    r = assess_sources(
+        s(
+            "https://techcrunch.com/real-story",
+            "https://www.bloomberg.com/another-story",
+            "https://malware-filter.gitlab.io/phishing-filter/phishing-filter.txt",
+        )
+    )
+    assert r["status"] == "uncorroborated"
+    assert r["score"] == 0.0
+    assert "flagged" in r["detail"]
+
+
+def test_multi_tld_self_domain_does_not_count_as_independent():
+    # teravolt.com / teravolt.jp / teravolt.trading are the same company's own
+    # presence across TLDs, not third-party coverage.
+    r = assess_sources(
+        s("https://teravolt.jp/about", "https://teravolt.trading/"),
+        company_host="teravolt.com",
+    )
+    assert r["status"] == "uncorroborated"
+
+
+def test_multi_tld_guard_does_not_collide_on_short_generic_names():
+    # The leftmost-label heuristic is length-gated so two unrelated companies
+    # with short/generic names don't get wrongly merged.
+    r = assess_sources(
+        s("https://go.example-news.com/story", "https://axios.com/story"),
+        company_host="go.io",
+    )
+    assert r["status"] == "corroborated"  # both sources are real, independent
+
+
+def test_subdomain_of_existence_only_host_is_still_existence_only():
+    r = assess_sources(s("https://uk.linkedin.com/company/acme", "https://techcrunch.com/acme"))
+    assert r["status"] == "under_corroborated"  # only the techcrunch hit counts
+    assert r["score"] == 1.0
+
+
 def test_recon_cannot_promote_a_code_host_into_counting_at_all():
     # A real-run bug: recon named github.com tier3 for a dev-tools topic
     # (topically plausible), which would otherwise let a mere repo existing
