@@ -128,7 +128,7 @@ def draft_proposal(
         if rescope_notes
         else ""
     )
-    return _json_call(
+    out = _json_call(
         settings,
         model=settings.anthropic_model_judgment,
         system=(
@@ -144,6 +144,17 @@ def draft_proposal(
             "open_questions (list[str], <=3, each a direct standalone question), notes (str)."
         ),
     )
+    # The model doesn't always include every requested key (seen live: a real
+    # response once omitted zoom_level entirely) -- default the full Proposal
+    # shape rather than let a downstream consumer KeyError on a skipped field.
+    out.setdefault("layers", [])
+    out.setdefault("layer_definitions", {})
+    out.setdefault("in_scope", [])
+    out.setdefault("excluded_adjacent", [])
+    out.setdefault("zoom_level", "company")
+    out.setdefault("open_questions", [])
+    out.setdefault("notes", "")
+    return out
 
 
 # --------------------------------------------------------------------------- #
