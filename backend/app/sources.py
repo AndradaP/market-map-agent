@@ -36,9 +36,14 @@ TIER3_HOSTS = {
     "github.blog", "thenewstack.io", "infoq.com", "venturebeat.com",
 }
 # Existence-only — confirms what a company claims, never counts toward the two.
+# Includes code/package hosts: a repo or package listing existing is not
+# independent editorial coverage, however relevant the host is to the topic
+# (see classify(): this list overrides even recon-supplied extra_by_tier).
 EXISTENCE_ONLY_HOSTS = {
     "prnewswire.com", "businesswire.com", "globenewswire.com", "einnews.com",
     "prweb.com", "medium.com", "substack.com", "linkedin.com",
+    "github.com", "gitlab.com", "bitbucket.org", "npmjs.com",
+    "registry.npmjs.org", "pypi.org", "marketplace.visualstudio.com",
 }
 # Explicitly excluded — scraped/republished "free market research" aggregators.
 EXCLUDED_HOSTS = {
@@ -59,15 +64,21 @@ def classify(url: str, *, company_host: Optional[str] = None,
     if company_host and (h == company_host or h.endswith("." + company_host)):
         return "existence_only"
 
+    # Hardcoded non-counting hosts win even over recon-supplied extra_by_tier:
+    # Recon names outlets that are *topically* relevant, but a code host or a
+    # PR wire isn't independent editorial coverage no matter how on-topic it
+    # is — e.g. recon calling github.com "tier3" for a dev-tools query would
+    # otherwise let a mere repo existing corroborate the company.
+    if h in EXCLUDED_HOSTS:
+        return "excluded"
+    if h in EXISTENCE_ONLY_HOSTS:
+        return "existence_only"
+
     extra_by_tier = extra_by_tier or {}
     for tier in ("tier1", "tier2", "tier3"):
         if h in {host_of(x) for x in extra_by_tier.get(tier, [])}:
             return tier
 
-    if h in EXCLUDED_HOSTS:
-        return "excluded"
-    if h in EXISTENCE_ONLY_HOSTS:
-        return "existence_only"
     if h in TIER1_HOSTS or h.endswith(GOV_SUFFIXES) or h.endswith(EDU_SUFFIXES):
         return "tier1"
     if h in TIER2_HOSTS:

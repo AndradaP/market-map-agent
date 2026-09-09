@@ -72,3 +72,17 @@ def test_recon_supplied_outlets_are_honoured():
     )
     assert r["status"] == "under_corroborated"
     assert r["score"] == 2.0
+
+
+def test_recon_cannot_promote_a_code_host_into_a_counting_tier():
+    # A real-run bug: recon named github.com tier3 for a dev-tools topic
+    # (topically plausible), which let a mere repo existing "corroborate" any
+    # company that has one. Code/package hosts must never count, regardless
+    # of what recon says.
+    r = assess_sources(
+        s("https://github.com/acme/acme", "https://gitlab.com/acme/acme"),
+        extra_by_tier={"tier3": ["github.com", "gitlab.com"]},
+        threshold=TH,
+    )
+    assert r["status"] == "uncorroborated"
+    assert r["score"] == 0.0
