@@ -14,7 +14,46 @@ from typing import Any, Dict, List
 from .. import llm, run_log
 from ..config import get_settings
 from ..state import Company, MarketMapState
-from ..utils import now_iso
+from ..utils import host_of, now_iso
+
+_STATUS_RANK = {"corroborated": 0, "under_corroborated": 1, "uncorroborated": 2}
+
+
+def _dedupe_across_layers(research: Dict[str, List[Company]]) -> Dict[str, List[Company]]:
+    """Each layer's search->extract->corroborate pipeline runs in isolation
+    (see execute_node), so the same real company routinely gets extracted
+    independently by more than one layer -- seen live, ~15% of a run's entries
+    could be the same handful of companies repeated 2-3x. Canonicalize by host
+    (this also absorbs cosmetic URL differences like www./trailing slash that
+    were otherwise causing the SAME url to pass existence in one layer and
+    transiently fail it in another) and keep only the single best-status
+    instance across the whole run.
+    """
+    best_by_host: Dict[str, tuple] = {}  # host -> (rank, (layer, index))
+    for layer, cands in research.items():
+        for idx, c in enumerate(cands):
+            host = host_of(c.get("url", ""))
+            if not host:
+                continue
+            corrob = c.get("corroboration", {})
+            rank = (
+                _STATUS_RANK.get(corrob.get("status"), 2),
+                -len(corrob.get("independent_hosts", [])),
+                -corrob.get("score", 0.0),
+            )
+            key = (layer, idx)
+            cur = best_by_host.get(host)
+            if cur is None or rank < cur[0]:
+                best_by_host[host] = (rank, key)
+
+    winners = {key for _, key in best_by_host.values()}
+    return {
+        layer: [
+            c for idx, c in enumerate(cands)
+            if not host_of(c.get("url", "")) or (layer, idx) in winners
+        ]
+        for layer, cands in research.items()
+    }
 
 
 def synthesize_node(state: MarketMapState) -> dict:
@@ -22,7 +61,7 @@ def synthesize_node(state: MarketMapState) -> dict:
     scope = state["confirmed_scope"]
     defs: Dict[str, str] = scope.get("layer_definitions", {})
     adjacent: List[str] = scope.get("excluded_adjacent", [])
-    research: Dict[str, List[Company]] = state.get("layer_research", {})
+    research: Dict[str, List[Company]] = _dedupe_across_layers(state.get("layer_research", {}))
     layer_meta: Dict[str, Any] = state.get("layer_meta", {})
     soft, hard = settings.layer_company_soft_target, settings.layer_company_hard_cap
 

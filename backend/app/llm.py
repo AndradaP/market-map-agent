@@ -141,7 +141,14 @@ def draft_proposal(
             "Return JSON with keys: layers (list[str], 3-7), layer_definitions "
             "(object mapping each layer -> one sentence), in_scope (list[str]), "
             "excluded_adjacent (list[str]), zoom_level ('component'|'company'|'category'), "
-            "open_questions (list[str], <=3, each a direct standalone question), notes (str)."
+            "open_questions (list[str], <=3, each a direct standalone question), notes (str).\n\n"
+            "Two scoping calls you must make explicitly, not by accident — state the "
+            "decision in `notes`, and reflect it in `excluded_adjacent` when it's clear-cut "
+            "for this topic, or as one of the `open_questions` when it's a genuine judgment "
+            "call: (1) Do generalist consulting/engineering/services firms that serve this "
+            "space belong in scope, or only companies selling a distinct, repeatable "
+            "product/technology? (2) Should large, diversified incumbents be included for "
+            "an accurate landscape, or is this meant to focus on emerging/pure-play players?"
         ),
     )
     # The model doesn't always include every requested key (seen live: a real
@@ -186,12 +193,24 @@ def extract_companies(
         settings,
         model=settings.anthropic_model_mechanical,
         system=(
-            "You extract real, named companies/products/projects from web search "
-            "results, for one layer of a value-chain market map. Only extract "
-            "entities actually named in the text — never invent one. Merge repeat "
-            "mentions of the same company into a single entry. Skip generic "
-            "mentions with no identifiable name, and skip the outlet/publication "
-            "itself (e.g. don't extract 'TechCrunch' from a TechCrunch article)."
+            "You extract real, named COMPANIES (distinct organizations/vendors) from "
+            "web search results, for one layer of a value-chain market map. Only "
+            "extract entities actually named in the text — never invent one.\n"
+            "What NOT to extract, even if named prominently: a product, model, or "
+            "feature that belongs to a company (extract the company itself instead — "
+            "e.g. 'Google' or 'OpenAI', never 'Gemini' or 'GPT-5' as if it were its "
+            "own company); a regulation, standard, or policy instrument (e.g. 'EU AI "
+            "Act', 'NIST AI RMF' are not companies); the outlet/publication itself "
+            "(don't extract 'TechCrunch' from a TechCrunch article).\n"
+            "What TO extract, easy to miss: a company named only as a comparison or "
+            "alternative inside text primarily about someone else (e.g. 'unlike "
+            "Competitor X, Acme does Y' should still surface Competitor X) — don't "
+            "only extract whichever company is the headline subject of a result; "
+            "scan every result's full text for names mentioned in passing too.\n"
+            "Canonicalization: merge repeat mentions of the same company into one "
+            "entry, and when the text uses more than one name form for it (an "
+            "abbreviation, ticker, or shortened form alongside a fuller one), use the "
+            "fullest/most complete form actually present in the text."
         ),
         user=(
             f"Topic: {topic!r}\nLayer: {layer!r}\nLayer definition: {definition!r}\n\n"

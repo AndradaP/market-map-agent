@@ -6,8 +6,15 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
 
+import httpx
 from langsmith import traceable
-from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from . import llm, stubs
 from .config import Settings, get_settings
@@ -183,20 +190,38 @@ _BROWSER_HEADERS = {
 }
 
 
+@retry(
+    retry=retry_if_exception_type(httpx.TransportError),
+    stop=stop_after_attempt(2),
+    wait=wait_exponential(multiplier=1, min=1, max=5),
+    reraise=True,
+)
+def _fetch(url: str):
+    r = httpx.head(url, headers=_BROWSER_HEADERS, follow_redirects=True, timeout=8.0)
+    if r.status_code >= 400 or r.status_code == 405:
+        r = httpx.get(url, headers=_BROWSER_HEADERS, follow_redirects=True, timeout=10.0)
+    return r
+
+
 @traceable(name="exa.resolve_url")
 def resolve_url(url: str, *, settings: Optional[Settings] = None) -> dict:
     """{resolves: bool, final_url: str, status: int} — used by Verify for the
     existence/identity check. A fabricated-looking URL that doesn't resolve is
-    worse than no URL, so this is a hard gate."""
+    worse than no URL, so this is a hard gate.
+
+    One retry absorbs plain network flakiness (seen live: the identical URL,
+    modulo a www./trailing-slash cosmetic difference, resolved fine twice in
+    one run and failed with a bare connection error the third time). `status`
+    is returned as-is on a real HTTP response (including 403/429) so Verify
+    can weigh an ambiguous bot-block differently from a hard failure, rather
+    than that policy call being made here.
+    """
     settings = settings or get_settings()
     if settings.stubs_enabled:
         return stubs.resolve_url(url)
-    import httpx
 
     try:
-        r = httpx.head(url, headers=_BROWSER_HEADERS, follow_redirects=True, timeout=8.0)
-        if r.status_code >= 400 or r.status_code == 405:
-            r = httpx.get(url, headers=_BROWSER_HEADERS, follow_redirects=True, timeout=10.0)
+        r = _fetch(url)
         return {"resolves": r.status_code < 400, "final_url": str(r.url), "status": r.status_code}
     except Exception as exc:  # noqa: BLE001
         return {"resolves": False, "final_url": url, "status": 0, "error": str(exc)}

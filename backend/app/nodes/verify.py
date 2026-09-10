@@ -31,12 +31,27 @@ def verify_node(state: MarketMapState) -> dict:
             # (1) existence & identity
             res = search.resolve_url(c["url"])
             if not res.get("resolves"):
-                c["rejection_reason"] = (
-                    f"failed_existence: URL did not resolve ({res.get('status')})"
-                )
-                checked.append(c)
-                continue
-            c["url"] = res.get("final_url", c["url"])
+                status = res.get("status")
+                corrob_status = c.get("corroboration", {}).get("status")
+                if status in (403, 429) and corrob_status == "corroborated":
+                    # A 403/429 means the site is there but blocking automated
+                    # access (bot protection), not "this doesn't exist" -- seen
+                    # live: a strongly-corroborated real company (4+ independent
+                    # press sources) getting hard-rejected purely because its
+                    # site's WAF blocks a plain HTTP client. Don't let an
+                    # ambiguous network signal override real independent
+                    # evidence; downgrade to the review queue instead.
+                    c["corroboration"]["status"] = "under_corroborated"
+                    c["corroboration"]["detail"] += (
+                        f" — site blocked automated verification (HTTP {status}); "
+                        "flagged for manual existence check rather than rejected outright"
+                    )
+                else:
+                    c["rejection_reason"] = f"failed_existence: URL did not resolve ({status})"
+                    checked.append(c)
+                    continue
+            else:
+                c["url"] = res.get("final_url", c["url"])
             c["one_liner"] = llm.company_one_liner(
                 c["name"],
                 c["url"],

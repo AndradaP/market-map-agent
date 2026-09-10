@@ -9,6 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+import httpx
+
 from backend.app import search
 from backend.app.config import Settings
 
@@ -50,3 +52,33 @@ def test_get_fallback_also_carries_the_user_agent(monkeypatch):
     out = search.resolve_url("https://example.com", settings=REAL)
     assert out["resolves"] is True
     assert "Mozilla" in captured["headers"]["User-Agent"]
+
+
+def test_transient_network_error_is_retried_then_succeeds(monkeypatch):
+    # Seen live: the identical URL (modulo a cosmetic www./trailing-slash
+    # difference) resolved fine elsewhere in the same run and failed here with
+    # a bare connection error -- plain network flakiness, not non-existence.
+    calls = {"n": 0}
+
+    def fake_head(url, *, headers=None, **kw):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise httpx.ConnectError("connection reset")
+        return _FakeResponse(200)
+
+    monkeypatch.setattr("httpx.head", fake_head)
+
+    out = search.resolve_url("https://example.com", settings=REAL)
+    assert calls["n"] == 2
+    assert out["resolves"] is True
+
+
+def test_persistent_network_error_still_reports_status_zero(monkeypatch):
+    def fake_head(url, *, headers=None, **kw):
+        raise httpx.ConnectError("connection reset")
+
+    monkeypatch.setattr("httpx.head", fake_head)
+
+    out = search.resolve_url("https://example.com", settings=REAL)
+    assert out["resolves"] is False
+    assert out["status"] == 0
