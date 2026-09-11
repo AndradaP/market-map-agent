@@ -14,7 +14,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Tuple
 
-from .. import llm, search, sources
+from .. import llm, registry, search, sources
 from ..config import Settings, get_settings
 from ..state import Company, MarketMapState
 from ..utils import host_of
@@ -38,7 +38,14 @@ def _research_layer(
     scored: List[Company] = []
     kept_sources_by_name: Dict[str, list] = {}
     for c in raw:
-        smeta = c.get("sources", [])
+        canonical_name, smeta = registry.merge_and_store(
+            name=c["name"],
+            url=c["url"],
+            new_sources=c.get("sources", []),
+            topic=topic,
+            settings=settings,
+        )
+        c = {**c, "name": canonical_name}
         assessed = sources.assess_sources(
             smeta,
             company_host=host_of(c["url"]),
