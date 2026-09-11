@@ -27,7 +27,7 @@ def build_checkpointer(settings: Settings) -> Checkpointer:
     if settings.database_url:
         from langgraph.checkpoint.postgres import PostgresSaver
 
-        cm = PostgresSaver.from_conn_string(settings.database_url)
+        cm = PostgresSaver.from_conn_string(settings.database_url.get_secret_value())
         saver = cm.__enter__()
         saver.setup()  # idempotent: creates checkpoint tables if absent
         return Checkpointer(saver, cm)

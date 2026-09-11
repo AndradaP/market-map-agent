@@ -98,7 +98,7 @@ def _merge_postgres(
     import psycopg
     from psycopg.types.json import Jsonb
 
-    with psycopg.connect(settings.database_url) as conn:
+    with psycopg.connect(settings.database_url.get_secret_value()) as conn:
         row = conn.execute(
             "select canonical_name, sources, topics_seen from company_registry "
             "where canonical_host = %s",

@@ -26,7 +26,7 @@ def _exa(settings: Settings):
     if "e" not in _exa_cache:
         from exa_py import Exa
 
-        _exa_cache["e"] = Exa(settings.exa_api_key)
+        _exa_cache["e"] = Exa(settings.exa_api_key.get_secret_value() if settings.exa_api_key else None)
     return _exa_cache["e"]
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Optional
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +16,15 @@ class Settings(BaseSettings):
     )
 
     # LLM
-    anthropic_api_key: Optional[str] = None
+    # SecretStr, not str: this whole Settings object gets passed as an argument
+    # to every @traceable-decorated llm.py/search.py function, and LangSmith's
+    # tracing captures full function arguments -- a plain str field here means
+    # the raw key gets uploaded to LangSmith in plaintext on every call (this
+    # actually happened: found live in a trace, all three keys had to be
+    # rotated). SecretStr reprs/serializes as '**********' unless code
+    # explicitly calls .get_secret_value(), which only the real client
+    # constructors below should ever do.
+    anthropic_api_key: Optional[SecretStr] = None
     # Only needed for an org-level (unscoped) key on a multi-workspace account —
     # sent as the `anthropic-workspace-id` header. Leave blank for a
     # workspace-scoped key (the normal case).
@@ -25,14 +34,16 @@ class Settings(BaseSettings):
     anthropic_model_mechanical: str = "claude-sonnet-5"
 
     # Search / verification
-    exa_api_key: Optional[str] = None
+    exa_api_key: Optional[SecretStr] = None
 
     # Observability
-    langsmith_api_key: Optional[str] = None
+    langsmith_api_key: Optional[SecretStr] = None
     langsmith_project: str = "market-map-agent"
 
-    # Persistence (run log + LangGraph checkpointer share this DB)
-    database_url: Optional[str] = None
+    # Persistence (run log + LangGraph checkpointer share this DB) -- a
+    # connection string with an embedded password, same leak risk as the API
+    # keys above.
+    database_url: Optional[SecretStr] = None
 
     # Behaviour
     use_stubs: bool = True

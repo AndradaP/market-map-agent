@@ -25,7 +25,7 @@ def _client(settings: Settings):
     if "c" not in _client_cache:
         from anthropic import Anthropic
 
-        kwargs = {"api_key": settings.anthropic_api_key}
+        kwargs = {"api_key": settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None}
         # Pin the real API unless explicitly overridden, so an ambient
         # ANTHROPIC_BASE_URL (e.g. a proxy) can't misroute the standalone agent.
         kwargs["base_url"] = settings.anthropic_base_url or "https://api.anthropic.com"

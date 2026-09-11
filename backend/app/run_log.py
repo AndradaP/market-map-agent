@@ -78,7 +78,7 @@ def write_run_log(record: Dict[str, Any], settings: Settings) -> Dict[str, Any]:
         payload = dict(record)
         payload["confirmed_scope_summary"] = Jsonb(payload["confirmed_scope_summary"])
         payload["warnings"] = Jsonb(payload["warnings"])
-        with psycopg.connect(settings.database_url) as conn:
+        with psycopg.connect(settings.database_url.get_secret_value()) as conn:
             conn.execute(_INSERT_SQL, payload)
             conn.commit()
         return record
