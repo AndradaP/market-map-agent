@@ -1,6 +1,6 @@
 # Market Map Agent — PRD
 
-**Status:** draft · **Last updated:** 2026-09-07
+**Status:** draft · **Last updated:** 2026-09-13
 
 ---
 
@@ -77,11 +77,11 @@ One user, a web form, no login (v1).
 | # | Node | In | Out |
 |---|------|----|----|
 | 1 | **Recon** | topic string | search results/snippets; the tier 1–3 outlets that are credible *for this topic* |
-| 2 | **Propose** | recon results (+ rescope notes) | proposal: `layers`, `layer_definitions`, `in_scope`, `excluded_adjacent`, `zoom_level` (`component`/`company`/`category`), `open_questions`, honest `notes` |
+| 2 | **Propose** | recon results (+ rescope notes) | proposal: `layers`, `layer_definitions`, `in_scope`, `excluded_adjacent`, `zoom_level` (`component`/`company`/`category`), `open_questions`, honest `notes` — and now two scoping calls stated explicitly rather than left to accident: are generalist consulting/services firms in scope, and are large incumbents included alongside emerging players (see BACKLOG.md, "manual review pass") |
 | 3 | **Confirm / edit** | the proposal | confirmed scope, **or** a routed edge back to Propose (or Recon, if "different topic"). A real pause — `interrupt()` suspends, `Command(resume=…)` continues. |
-| 4 | **Execute** | confirmed scope | raw candidates per layer — name, claimed URL, corroborating sources, tier-weighted corroboration verdict. Parallel across layers. |
-| 5 | **Verify** | raw candidates | per company: existence & identity check (URL resolves; grounded one-liner from retrieved text) **and** category-fit check (one-liner vs the layer's confirmed definition). Failures kept with a reason. |
-| 6 | **Synthesize** | confirmed scope + verified layers | final map (structured); write the run-log row |
+| 4 | **Execute** | confirmed scope | raw candidates per layer — name, claimed URL, corroborating sources, independent-source-count corroboration verdict (see §6). Each candidate is first merged against the persistent company registry (cross-run accumulated evidence, keyed by domain) before scoring. Parallel across layers. |
+| 5 | **Verify** | raw candidates | per company: existence & identity check (URL resolves — a 403/429 on a company that already cleared corroboration downgrades to the review queue rather than hard-rejecting, since that's an ambiguous bot-block signal, not proof the company is fake; grounded one-liner from retrieved text) **and** category-fit check (one-liner vs the layer's confirmed definition). Failures kept with a reason. |
+| 6 | **Synthesize** | confirmed scope + verified layers | cross-layer dedup first (the same company independently found by more than one layer is merged by canonical host, kept once at its best status — not shown as a duplicate); final map (structured); write the run-log row |
 
 ## 6. Rules
 
@@ -129,6 +129,20 @@ not a curated "credible outlet" judgment.)*
 - 0 independent sources → **rejected**.
 - Tier data (tier 1/2/3, per the original typology) is still computed and
   shown as a "featured in ..." display badge — it no longer gates anything.
+- **Threat-intel hard veto** (found live: a domain that was actually listed on
+  a security phishing/malware blocklist was scoring as "independent coverage"):
+  any source matching a known blocklist pattern disqualifies the company
+  outright, regardless of what else was found.
+- **Plausibility sanity pass** (found live: dense spam/content-farm swarms in
+  some fields cleared the mechanical gate undetected): one cheap LLM check,
+  applied only to the small shortlist that already passed, asking whether the
+  sources read as genuine coverage or generic noise. Fails *open* on any
+  error — a hiccup here can never bury a company the real gate already
+  accepted.
+- **Cross-run company registry**: every independent source ever found for a
+  company (keyed by canonical domain) accumulates across every run and topic,
+  Postgres-backed, instead of each run starting from zero. Also settles on the
+  fullest name form ever seen for a company across runs.
 
 ### Verification — two separate checks
 - **Existence & identity** — the URL resolves to that company (a plausible but
@@ -186,10 +200,18 @@ pause durable across processes); the run log is the intentional record.
 - LangGraph state machine; `interrupt()` / `Command(resume=…)` for the gate.
 - FastAPI wraps the compiled graph: `POST /runs`, `POST /runs/{id}/respond`,
   `GET /runs/{id}`.
-- Postgres checkpointer for durable pause/resume (MemorySaver offline).
-- React + Vite frontend — three screens.
+- Postgres checkpointer for durable pause/resume (MemorySaver offline). Wired
+  to a live Supabase Postgres instance and confirmed working — not just the
+  design intent — alongside the run log and the company registry, which share
+  the same database.
+- React + Vite frontend — three screens. **Never run against the live
+  backend** (built early, untouched since); `npm install` alone is unverified.
 - LangSmith tracing active whenever `LANGSMITH_API_KEY` is set; every node call
-  and every LLM/Exa call is a span.
+  and every LLM/Exa call is a span. Secret `Settings` fields are pydantic
+  `SecretStr` specifically because this tracing serializes full function
+  arguments by default — a plain-`str` API key field leaked into stored trace
+  data live (see BACKLOG.md); all Settings secrets were converted after
+  rotating the exposed keys.
 - Deterministic offline stubs for every LLM/search call, so the loop runs with no
   keys.
 

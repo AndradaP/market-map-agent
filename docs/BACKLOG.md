@@ -39,7 +39,7 @@ Not for `main`. Tracks what's done and what's next. Pairs with
 ## Next
 
 ### M1 — real pipeline  *(do roughly in order)*
-- [ ] Get keys: Anthropic, Exa, LangSmith. Confirm a real run shows up in LangSmith with cost/latency.
+- [x] Get keys: Anthropic, Exa, LangSmith. Confirmed real runs show up in LangSmith (this is also how the API-key leak below was found).
 - [x] **Real Execute path.** `search.find_company_sources`'s live branch used to
       just group search hits by domain. Now: search → `llm.extract_companies`
       (one call over all hits together, so one hit naming several companies and
@@ -68,22 +68,98 @@ Not for `main`. Tracks what's done and what's next. Pairs with
       domain, PR wires, code/package hosts, known low-signal aggregators.
       Tier data is kept as a display-only "featured in ..." badge. See
       `docs/PRD.md`'s Corroboration section for the full rationale.
-- [ ] **Diagnostic batch against the new model** — run geothermal, AEO/GEO,
-      neo-cloud, AI-native GTM, AI/LLM security, and AI infra to see how the
-      count-based rule and Recon's per-topic outlet discovery hold up across
-      genuinely different fields before tuning further.
-- [ ] Prompt tuning, in this order: Propose (scope quality is the point) → company
-      one-liners → category-fit → layer explanations. Add few-shot examples.
+- [x] **Diagnostic batch against the new model** — ran geothermal, AEO/GEO,
+      neo-cloud, AI-native GTM, AI/LLM security, and AI infra against live
+      keys. Found the count-based rule (above) traded one failure mode for a
+      worse one in spam-dense fields: AEO/GEO's swarm of small, near-identical
+      content-farm domains cleared the mechanical ≥2-source gate undetected,
+      and in AI infra a domain that was actually listed on a security
+      phishing/malware blocklist scored as "independent coverage." Neither is
+      a corroboration-quality nitpick — the second one is a real trust/safety
+      problem for a tool that vouches for companies.
+- [x] **Harden against spam and threat-intel hits.** `sources.assess_sources`
+      now hard-vetoes any source matching a threat-intel/blocklist pattern,
+      regardless of what else was found. Added `llm.plausibility_check`: one
+      cheap LLM sanity pass, applied only to the small shortlist that already
+      cleared the mechanical gate (not every candidate), asking whether the
+      sources read as genuine coverage or generic content-farm noise —
+      fails *open* on any error so a hiccup in this bonus check can never
+      bury a company the real gate already accepted. Also fixed two real
+      host-matching bugs found in the same batch: multi-TLD self-promotion
+      (`teravolt.jp`/`.trading` counting as independent from `teravolt.com`)
+      and subdomains of a junk host not matching it (`uk.linkedin.com` vs
+      `linkedin.com`) — both are now suffix-aware.
+- [x] **Manual review pass — five root causes, not isolated bugs.** A close
+      read of real output (not just metrics) across the diagnostic batch
+      surfaced: (1) no canonical company identity across layers/runs, causing
+      cross-layer duplicates (~15% of one run's entries) and the same real
+      company scoring inconsistently run-to-run purely from search luck
+      (Nscale: 4 sources under one topic, 1 under an adjacent one); (2)
+      `extract_companies`'s definition of "company" was underspecified —
+      products/regulations got extracted as if they were vendors (`Gemini`,
+      `EU AI Act`), and real companies mentioned only as a comparison inside
+      someone else's coverage were missed (`Profound`, `Bluefish AI` —
+      confirmed present in the retrieved text, never promoted to candidates);
+      (3) Propose left two universal scoping questions (services vs. product
+      vendors; incumbents vs. emerging players) to accident instead of an
+      explicit decision; (4) existence verification was a single, one-shot,
+      binary gate blind to corroboration strength — a well-corroborated real
+      company (Fervo Energy, 7 independent sources) got hard-rejected purely
+      because its site's bot protection 403'd a plain HTTP client; (5) no
+      persistent memory of a company across runs/topics (see registry below).
+      Fixed (1)-(4): `synthesize._dedupe_across_layers` (canonical-host merge,
+      keeps the best-status instance run-wide), a tightened extraction
+      prompt (excludes products/regulations, extracts comparison-only
+      mentions, canonicalizes to the fullest name form seen), Propose's
+      prompt now requires stating both scoping decisions explicitly, and
+      `resolve_url` retries transient network errors once + `verify_node`
+      no longer lets an ambiguous 403/429 override a company that already
+      cleared corroboration (downgrades to review queue instead of
+      hard-rejecting a weakly-corroborated one still gets rejected as before).
+      Confirmed live: rerunning geothermal after these fixes went from 8
+      duplicated companies (of 75 entries) to 0, and Fervo Energy correctly
+      moved from rejected to the review queue.
+- [x] **Persistent cross-run company registry** (root cause #5 above).
+      `registry.merge_and_store` keys a company by canonical host and
+      accumulates every independent source ever found for it across every
+      run/topic instead of starting from zero each time; also settles on the
+      fullest name form ever seen (fixes `Together`/`Together AI`
+      oscillation). Falls back to a local JSON file when no `DATABASE_URL` is
+      set; no-op pass-through in stub mode. Migration:
+      `supabase/migrations/0002_company_registry.sql`. Confirmed working
+      against a live Supabase Postgres instance (see M2 below).
+- [x] **Security: API keys were leaking into LangSmith trace data.** Found
+      while reviewing a trace pulled for the registry work: every
+      `@traceable` llm.py/search.py function takes a `Settings` object as an
+      argument, and LangSmith's tracing serializes full function arguments by
+      default — the Anthropic, Exa, and LangSmith API keys (plain `str`
+      fields) were sitting in plaintext in stored trace data. All three keys
+      were rotated immediately. Root-cause fix: `config.py`'s secret fields
+      (`anthropic_api_key`, `exa_api_key`, `langsmith_api_key`,
+      `database_url`) are now pydantic `SecretStr`, which masks as
+      `**********` on repr/str/`model_dump_json` — the exact serialization
+      path a tracer uses — unless code explicitly calls `.get_secret_value()`,
+      which now happens only at the real client constructors. Locked in by
+      `test_secrets_never_leak.py` so it can't regress silently. Tried to
+      sanitize the already-exposed historical traces via the LangSmith API;
+      it rejects edits to a completed run ("duplicate run update"), so that
+      isn't possible — rotation is what actually neutralizes the exposure.
+- [ ] Prompt tuning still open: company one-liners → category-fit → layer
+      explanations (Propose's scope-decision prompting is done, above). Add
+      few-shot examples.
 - [ ] Decide open question #1 (structured clarifying questions vs strings) once
       there are real proposals to look at.
 
 ### M2 — product surface
-- [ ] `npm install` + run the frontend against a live FastAPI backend.
+- [ ] `npm install` + run the frontend against a live FastAPI backend. Never
+      attempted — built early in M0, untouched since; real risk of
+      undiscovered integration bugs given how much the backend has changed.
 - [ ] Verify the interrupt/resume round-trips survive going over HTTP — including
       the clarification round (two interrupts in one node).
-- [ ] Point `DATABASE_URL` at the Supabase project; run `0001_run_log.sql`;
-      confirm PostgresSaver checkpointing + the run-log insert work against real
-      Postgres (only MemorySaver / jsonl are exercised today).
+- [x] Point `DATABASE_URL` at the Supabase project; ran both migrations
+      (`0001_run_log.sql`, `0002_company_registry.sql`); confirmed
+      PostgresSaver checkpointing, the run-log insert, and the company
+      registry all work against a real, live Postgres instance.
 - [ ] Deploy: Dockerfile + backend on Railway or Render; frontend on Vercel.
 
 ### M3 — eval
