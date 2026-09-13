@@ -11,6 +11,21 @@ ZoomLevel = Literal["component", "company", "category"]
 EditType = Literal["none", "direct_edit", "rescope_request"]
 
 
+class OpenQuestion(TypedDict, total=False):
+    question: str
+    # Short label naming what this concerns -- usually a layer name from
+    # `layers`, or "scope"/"zoom_level" when it's not about one specific
+    # layer. Purely informational context for the UI, not a dispatch key.
+    affects: str
+    # 2-4 concrete choices the user can pick without outside research, or
+    # [] when the question is genuinely open-ended. Resolves the open design
+    # question (see OPEN_DECISIONS.md): a live UX test found a plain-string
+    # question referencing domain jargon ("should Guardrails be its own
+    # layer?") is unanswerable without looking the term up -- a concrete
+    # pick-one choice tied to a real, visible layer isn't.
+    options: List[str]
+
+
 class Proposal(TypedDict, total=False):
     layers: List[str]
     # DEVIATION FROM DRAFT SCHEMA: the draft had `layers: [str]` only. Verify's
@@ -20,7 +35,7 @@ class Proposal(TypedDict, total=False):
     in_scope: List[str]
     excluded_adjacent: List[str]
     zoom_level: ZoomLevel
-    open_questions: List[str]
+    open_questions: List[OpenQuestion]
     # Propose's honest caveats when recon is thin or contradictory (brief asks
     # for this behaviour explicitly under "Explicitly out of scope for v1").
     notes: str

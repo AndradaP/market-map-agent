@@ -40,3 +40,8 @@ ol li { margin-bottom: 14px; }
 .tiers { font-weight: 600; opacity: 0.9; margin-right: 4px; }
 .badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #38bdf833; margin-left: 6px; text-transform: uppercase; }
 .badge.warn { background: #f9731633; }
+.openq li { margin-bottom: 12px; }
+.openq .badge { margin-left: 0; margin-right: 6px; }
+.openq-options { margin-top: 6px; }
+.openq-options button { font-size: 13px; padding: 5px 10px; }
+.openq-options button.picked { background: #38bdf855; border-color: #38bdf8; }

@@ -35,8 +35,18 @@ _DEMOS: Dict[str, dict] = {
             ],
             "zoom_level": "company",
             "open_questions": [
-                "Should 'Guardrails' be its own layer rather than folded into Monitoring? It has a distinct vendor set.",
-                "Is model-provider-native tooling (e.g. dashboards shipped by an LLM API) in scope, or only third-party tools?",
+                {
+                    "question": "Should 'Guardrails' be its own layer rather than folded into "
+                    "Monitoring? It has a distinct vendor set.",
+                    "affects": "Monitoring, Alerting & Guardrails",
+                    "options": ["Keep as its own layer", "Fold into Monitoring, Alerting & Guardrails"],
+                },
+                {
+                    "question": "Is model-provider-native tooling (e.g. dashboards shipped by an "
+                    "LLM API) in scope, or only third-party tools?",
+                    "affects": "scope",
+                    "options": ["Include model-provider-native tooling", "Only third-party tools"],
+                },
             ],
             "notes": "Recon was rich and consistent for this topic; the split below is well-supported.",
         },
@@ -172,8 +182,16 @@ def proposal(topic: str, attempt: int = 1, rescope_notes: str = "") -> dict:
         "excluded_adjacent": [f"general-purpose infrastructure not specific to {topic}"],
         "zoom_level": "company",
         "open_questions": [
-            f"Is '{topic}' meant at the component level or the finished-product level?",
-            "Which adjacent categories should be treated as out of scope?",
+            {
+                "question": f"Is '{topic}' meant at the component level or the finished-product level?",
+                "affects": "zoom_level",
+                "options": ["Component level", "Finished-product / company level"],
+            },
+            {
+                "question": "Which adjacent categories should be treated as out of scope?",
+                "affects": "scope",
+                "options": [],
+            },
         ],
         "notes": (
             "No hand-written fixture for this topic and stub mode is on, so this is a "

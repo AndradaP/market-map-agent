@@ -40,10 +40,46 @@ def test_fully_populated_response_is_passed_through_unchanged(monkeypatch):
         "in_scope": ["x"],
         "excluded_adjacent": ["y"],
         "zoom_level": "category",
-        "open_questions": ["q?"],
+        "open_questions": [{"question": "q?", "affects": "A", "options": ["yes", "no"]}],
         "notes": "n",
     }
     monkeypatch.setattr(llm, "_json_call", lambda *a, **kw: dict(full))
 
     out = llm.draft_proposal(topic="t", recon_results=[], settings=REAL)
     assert out == full
+
+
+def test_legacy_plain_string_open_question_is_normalized(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "_json_call",
+        lambda *a, **kw: {"open_questions": ["is this in scope?"]},
+    )
+    out = llm.draft_proposal(topic="t", recon_results=[], settings=REAL)
+    assert out["open_questions"] == [{"question": "is this in scope?", "affects": "", "options": []}]
+
+
+def test_open_questions_are_capped_at_three_and_options_at_four(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "_json_call",
+        lambda *a, **kw: {
+            "open_questions": [
+                {"question": f"q{i}", "affects": "", "options": ["a", "b", "c", "d", "e"]}
+                for i in range(5)
+            ]
+        },
+    )
+    out = llm.draft_proposal(topic="t", recon_results=[], settings=REAL)
+    assert len(out["open_questions"]) == 3
+    assert len(out["open_questions"][0]["options"]) == 4
+
+
+def test_open_question_with_no_text_is_dropped(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "_json_call",
+        lambda *a, **kw: {"open_questions": [{"question": "", "affects": "x"}, {"question": "real one"}]},
+    )
+    out = llm.draft_proposal(topic="t", recon_results=[], settings=REAL)
+    assert out["open_questions"] == [{"question": "real one", "affects": "", "options": []}]

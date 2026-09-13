@@ -121,6 +121,17 @@ function ProposalReview({ review, onSend }) {
 
   const [rescopeNotes, setRescopeNotes] = useState("");
   const [differentTopic, setDifferentTopic] = useState(false);
+  const [answers, setAnswers] = useState({}); // question index -> chosen option
+
+  const pickAnswer = (i, question, option) => {
+    const next = { ...answers, [i]: option };
+    setAnswers(next);
+    setRescopeNotes(
+      Object.entries(next)
+        .map(([idx, opt]) => `${p.open_questions[idx].question} -> ${opt}`)
+        .join(" ")
+    );
+  };
 
   const capText = review.direct_edit_only
     ? review.handoff_message
@@ -240,7 +251,31 @@ function ProposalReview({ review, onSend }) {
       {p.open_questions?.length > 0 && (
         <>
           <h3>Open questions from the model</h3>
-          <ul>{p.open_questions.map((q, i) => <li key={i}>{q}</li>)}</ul>
+          <p className="hint">
+            Pick an answer below to draft a rescope note for it — no need to already know the
+            terminology, just choose the option you want.
+          </p>
+          <ul className="openq">
+            {p.open_questions.map((q, i) => (
+              <li key={i}>
+                {q.affects && <span className="badge">{q.affects}</span>} {q.question}
+                {q.options?.length > 0 && (
+                  <div className="openq-options">
+                    {q.options.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        className={answers[i] === opt ? "picked" : ""}
+                        onClick={() => pickAnswer(i, q, opt)}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
         </>
       )}
 

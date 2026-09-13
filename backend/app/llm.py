@@ -116,7 +116,9 @@ def draft_proposal(
 ) -> dict:
     settings = settings or get_settings()
     if settings.stubs_enabled:
-        return stubs.proposal(topic, attempt=attempt, rescope_notes=rescope_notes)
+        out = stubs.proposal(topic, attempt=attempt, rescope_notes=rescope_notes)
+        out["open_questions"] = _normalize_open_questions(out.get("open_questions", []))
+        return out
 
     snippets = "\n".join(
         f"- {r.get('title','')}: {r.get('text','')[:280]} ({r.get('url','')})"
@@ -141,7 +143,16 @@ def draft_proposal(
             "Return JSON with keys: layers (list[str], 3-7), layer_definitions "
             "(object mapping each layer -> one sentence), in_scope (list[str]), "
             "excluded_adjacent (list[str]), zoom_level ('component'|'company'|'category'), "
-            "open_questions (list[str], <=3, each a direct standalone question), notes (str).\n\n"
+            "open_questions (list, <=3, each {\"question\": str, \"affects\": str, "
+            "\"options\": list[str]}), notes (str).\n"
+            "Each open_question must be answerable without outside research: `affects` "
+            "names what it concerns (usually one of the `layers`, or \"scope\"/\"zoom_level\" "
+            "if not layer-specific), and `options` gives 2-4 concrete choices the user can "
+            "pick from directly — never assume the user already knows the jargon behind the "
+            "question (e.g. don't just ask 'should Guardrails be its own layer?' with no "
+            "options; give the concrete choices: ['Keep as its own layer', 'Fold into "
+            "<layer>']). Use options: [] only when a question is genuinely open-ended and "
+            "can't be reduced to a short pick-list.\n\n"
             "Two scoping calls you must make explicitly, not by accident — state the "
             "decision in `notes`, and reflect it in `excluded_adjacent` when it's clear-cut "
             "for this topic, or as one of the `open_questions` when it's a genuine judgment "
@@ -159,9 +170,29 @@ def draft_proposal(
     out.setdefault("in_scope", [])
     out.setdefault("excluded_adjacent", [])
     out.setdefault("zoom_level", "company")
-    out.setdefault("open_questions", [])
     out.setdefault("notes", "")
+    out["open_questions"] = _normalize_open_questions(out.get("open_questions", []))
     return out
+
+
+def _normalize_open_questions(raw: list) -> list:
+    """Defensive against a model response that doesn't fully match the
+    structured shape -- e.g. a plain string instead of the object, or an
+    options list longer than makes sense as a pick-list. Never let a
+    malformed open_questions entry break the confirm screen."""
+    out = []
+    for q in raw[:3]:
+        if isinstance(q, str):
+            out.append({"question": q, "affects": "", "options": []})
+        elif isinstance(q, dict):
+            out.append(
+                {
+                    "question": str(q.get("question", "")).strip(),
+                    "affects": str(q.get("affects", "")).strip(),
+                    "options": [str(o).strip() for o in (q.get("options") or [])][:4],
+                }
+            )
+    return [q for q in out if q["question"]]
 
 
 # --------------------------------------------------------------------------- #
