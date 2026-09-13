@@ -147,20 +147,43 @@ Not for `main`. Tracks what's done and what's next. Pairs with
 - [ ] Prompt tuning still open: company one-liners → category-fit → layer
       explanations (Propose's scope-decision prompting is done, above). Add
       few-shot examples.
-- [ ] Decide open question #1 (structured clarifying questions vs strings) once
-      there are real proposals to look at.
+- [x] **Open question #1 resolved** — `open_questions` is now structured
+      (`{question, affects, options}`) instead of plain strings, and answerable
+      in place in the UI (pick an option, it drafts the rescope note for you).
+      Directly motivated by a live finding: a real user testing the confirm
+      screen didn't know what "Guardrails" meant in a plain-string question
+      and would've needed to look it up to answer it; a concrete pick-one
+      choice tied to a visible layer doesn't require that. See
+      `OPEN_DECISIONS.md` #1 and PRD.md §5/§6.
 
 ### M2 — product surface
-- [ ] `npm install` + run the frontend against a live FastAPI backend. Never
-      attempted — built early in M0, untouched since; real risk of
-      undiscovered integration bugs given how much the backend has changed.
-- [ ] Verify the interrupt/resume round-trips survive going over HTTP — including
-      the clarification round (two interrupts in one node).
+- [x] **`npm install` + run the frontend against a live FastAPI backend.**
+      First time ever — built early in M0, untouched since. Found and fixed
+      real bugs along the way: the checkpointer connection-drop bug (below),
+      and frontend UX gaps (no way to start over or go back once past the
+      first screen; stale "tier-weighted source bar" copy; zoom level had no
+      inline explanation). The interrupt/resume round-trip over HTTP works
+      correctly, confirmed live, including the confirm/edit -> final-map path.
+- [x] Verify the interrupt/resume round-trips survive going over HTTP —
+      confirmed via the frontend smoke test above.
 - [x] Point `DATABASE_URL` at the Supabase project; ran both migrations
       (`0001_run_log.sql`, `0002_company_registry.sql`); confirmed
       PostgresSaver checkpointing, the run-log insert, and the company
       registry all work against a real, live Postgres instance.
+- [x] **Checkpointer connection-drop bug**, found running the live frontend
+      test above: `PostgresSaver.from_conn_string()` opens one bare
+      connection and holds it for the process's whole life; Supabase's
+      pooler (or just idle network flakiness) dropped it after a few
+      minutes, and every run after that hard-failed with "the connection is
+      closed" (a raw 500 through the frontend) until the process restarted.
+      Fixed by giving `PostgresSaver` a `psycopg_pool.ConnectionPool`
+      instead of a bare connection — natively supported (see
+      `langgraph.checkpoint.postgres._internal.Conn`) — which transparently
+      discards a dead connection and serves a fresh one. Verified live:
+      manually killed a connection the pool was holding mid-session; the
+      next checkpoint operation succeeded anyway.
 - [ ] Deploy: Dockerfile + backend on Railway or Render; frontend on Vercel.
+      Not started — no hosting accounts/CLIs set up yet on this machine.
 
 ### M3 — eval
 - [ ] Eval harness that reads the run log.
@@ -181,5 +204,5 @@ Not for `main`. Tracks what's done and what's next. Pairs with
 ---
 
 ## Open decisions  *(full write-ups in `OPEN_DECISIONS.md`)*
-1. Propose's clarifying-question wording + structure; rescope-note gate thresholds.
+1. ~~Propose's clarifying-question wording + structure~~ — resolved, see M1 above. Rescope-note gate thresholds still untuned.
 2. Run-log cost/token backfill mechanism.

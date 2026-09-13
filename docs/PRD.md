@@ -225,16 +225,19 @@ runs are long and pause mid-execution, which serverless does not handle well.
 |---|---|---|
 | **M0** | Skeleton *(done)* | Full loop wired, rescope cap, tracing, checkpointer, run log, FastAPI, frontend, offline stubs, tests. |
 | **M1** | Real pipeline | Live keys; real Exa company extraction (name + URL, not domain grouping); prompt tuning starting with Propose; first real runs. |
-| **M2** | Product surface | Frontend against a live backend; Supabase wired; deploy. |
+| **M2** | Product surface | Frontend against a live backend *(done)*; Supabase wired *(done)*; deploy *(not started — no hosting accounts set up)*. |
 | **M3** | Eval | Harness off the run log; iterate scope quality and company precision. |
 
 ## 11. Open questions
 
-1. **Clarifying questions.** Exact wording and structure of Propose's
-   `open_questions` and the rescope-note clarification copy — worth a review pass
-   before it's load-bearing. Candidate change: structured
-   `{question, affects: layers|scope|zoom, options?}` instead of plain strings so
-   the UI can place each question next to the control it affects.
+1. ~~Clarifying questions.~~ **Resolved.** `open_questions` is now
+   `list[{question, affects, options}]`, exactly the structured change
+   candidated here, prompted by a live finding: a real user testing the
+   confirm screen hit a plain-string question referencing domain jargon and
+   said they'd need to look the term up to answer it. The frontend renders
+   each option as a clickable choice that drafts the rescope note
+   automatically. The rescope-note *clarification* copy (a separate,
+   heuristic-gated flow) is still unreviewed.
 2. **Run-log cost/tokens.** Backfill from LangSmith by `run_id` a few seconds
    after the row is written, vs. tallying token counts locally from the Anthropic
    responses as the run goes.

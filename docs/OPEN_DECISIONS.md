@@ -13,9 +13,10 @@ None of these are locked in code in a way that's hard to change.
 - **#4 (direct-edit contract)** — resolved. Definitions are editable in the UI,
   required for any added layer; whole-scope payload, no diff. `normalize` flag adds
   an optional one-pass tidy.
-- **#1 (clarifying-question wording)** and **#5 (run-log cost/tokens)** — still open,
-  unchanged below. #1 also now covers the rescope-note clarification copy (edit f),
-  which is heuristic-gated and wants a review pass before it's load-bearing.
+- **#1 (clarifying-question wording)** — resolved, see the update below the original
+  write-up. The rescope-note clarification copy (edit f) is a separate, still-open
+  heuristic that wants a review pass before it's load-bearing.
+- **#5 (run-log cost/tokens)** — still open, unchanged below.
 
 ---
 
@@ -43,6 +44,19 @@ the model: "≤3, each a direct standalone question."
   but it's a UX decision, so I left it as `str` for you to call.
 - **Recommendation:** adopt the structured type; keep the cap at 3; add a prompt
   rule that every question names the field it affects.
+
+**Resolved.** Adopted exactly this, prompted by a live finding, not just the
+recommendation above going stale: testing the confirm screen with a real
+person, they hit a plain-string question referencing domain jargon ("should
+Guardrails be its own layer?") and said they'd need to look the term up to
+answer it. `open_questions` is now `list[{question, affects, options}]` —
+`affects` names the layer (or "scope"/"zoom_level") it concerns, `options`
+gives 2-4 concrete choices. The frontend renders each option as a button;
+picking one drafts the rescope note automatically, so answering never
+requires already knowing the terminology. `llm._normalize_open_questions`
+defensively handles a model response that doesn't fully comply (legacy
+plain strings, too many questions/options) rather than trusting it blindly.
+Cap stayed at 3, per the original recommendation.
 
 ---
 
