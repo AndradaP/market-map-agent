@@ -40,9 +40,24 @@ export default function App() {
   const send = (payload) =>
     guard(async () => routePayload(await respond(runId, payload)), review ? "review" : "topic");
 
+  const startOver = () => {
+    setError(null);
+    setRunId(null);
+    setReview(null);
+    setFinal(null);
+    setPhase("topic");
+  };
+
   return (
     <main>
-      <h1>Market Map Agent</h1>
+      <div className="topbar">
+        <h1>Market Map Agent</h1>
+        {phase !== "topic" && (
+          <button type="button" className="startover" onClick={startOver}>
+            Start a new market map
+          </button>
+        )}
+      </div>
       {error && <pre className="error">{error}</pre>}
       {phase === "loading" && <p>Working…</p>}
       {phase === "topic" && <TopicForm onSubmit={start} />}
@@ -64,7 +79,7 @@ function TopicForm({ onSubmit }) {
     >
       <label>
         Topic — broad or narrow
-        <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="e.g. produced water treatment" />
+        <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="e.g. neo-cloud, geothermal energy" />
       </label>
       <button type="submit">Research &amp; propose a structure</button>
     </form>
@@ -205,6 +220,11 @@ function ProposalReview({ review, onSend }) {
           <option value="category">category</option>
         </select>
       </label>
+      <p className="hint">
+        How granular the map's entries are: <strong>component</strong> = sub-parts (e.g. "battery
+        cells"), <strong>company</strong> = named companies (the usual case), <strong>category</strong> = broader
+        groupings instead of naming individual players.
+      </p>
 
       <div className="cols">
         <div>
@@ -352,7 +372,7 @@ function FinalMap({ final }) {
           <h3>Review queue — verified, but under-corroborated</h3>
           <p className="hint">
             These resolve to a real company in the right layer, but fall short of the
-            tier-weighted source bar. Promote or drop them by hand.
+            independent-source bar. Promote or drop them by hand.
           </p>
           <ul>
             {final.needs_review.map((c, i) => (
