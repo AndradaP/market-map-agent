@@ -1,0 +1,7 @@
+backend/
+requirements.txt
+requirements-dev.txt
+Procfile
+supabase/
+docs/
+.venv/
