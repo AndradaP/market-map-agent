@@ -42,7 +42,12 @@ def _json_call(settings: Settings, *, model: str, system: str, user: str) -> dic
     """One Claude call that must return a single JSON object."""
     msg = _client(settings).messages.create(
         model=model,
-        max_tokens=2000,
+        # 2000 used to be plenty; it stopped being enough once open_questions
+        # became {question, affects, options} (up to 3, each up to 4 options)
+        # plus the two explicit scoping calls in notes -- a real proposal
+        # response started getting cut off mid-string, seen live as
+        # json.decoder.JSONDecodeError: Unterminated string.
+        max_tokens=4096,
         system=system + "\n\nRespond with a single valid JSON object and nothing else.",
         messages=[{"role": "user", "content": user}],
     )
