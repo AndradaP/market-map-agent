@@ -61,9 +61,15 @@ in [docs/PRD.md](docs/PRD.md) and [docs/BACKLOG.md](docs/BACKLOG.md).
 
 The full loop is real and has been run against live Anthropic + Exa keys across a dozen topics spanning very different fields (energy, AI infrastructure, dev tools, security, SEO-adjacent markets), not just smoke-tested once. Corroboration, extraction, and the scope contract have all been revised at least once based on that live evidence, not just designed up front. 70+ tests passing.
 
-**Not yet done:** the React frontend has never been run against the live
-backend (built early, untouched since) — `npm install` alone is unverified.
-Prompt tuning for one-liners/category-fit is still open. Not deployed.
+The React frontend has since been run end-to-end against the live backend
+(not just built and left untouched) — first-run UX gaps found that way are
+fixed, and `open_questions` is now a structured, clickable field rather than
+plain text.
+
+**Not yet done:** prompt tuning for one-liners/category-fit is still open.
+Not deployed yet — deploy configs and a step-by-step runbook are ready in
+[docs/DEPLOY.md](docs/DEPLOY.md) (Railway for the backend, Vercel for the
+frontend, running in stub mode so a public link can't spend API credits).
 
 See [docs/PRD.md](docs/PRD.md) for the full spec and
 [docs/BACKLOG.md](docs/BACKLOG.md) for the complete history of what changed
