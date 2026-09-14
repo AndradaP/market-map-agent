@@ -61,25 +61,13 @@ in [docs/PRD.md](docs/PRD.md) and [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ## Status
 
-The full loop is real and has been run against live Anthropic + Exa keys across a dozen topics spanning very different fields (energy, AI infrastructure, dev tools, security, SEO-adjacent markets), not just smoke-tested once. Corroboration, extraction, and the scope contract have all been revised at least once based on that live evidence, not just designed up front. 80+ tests passing.
-
-The React frontend has since been run end-to-end against the live backend
-(not just built and left untouched) — first-run UX gaps found that way are
-fixed, and `open_questions` is now a structured, clickable field rather than
-plain text.
+The full loop has been run against live Anthropic + Exa keys across a dozen topics spanning different fields (e.g., energy, AI infrastructure, dev tools, security, SEO-adjacent markets). Corroboration, extraction, and the scope contract have been revised at least once based on that live evidence.
 
 **Deployed** — backend on Railway, frontend on Vercel (see
-[docs/DEPLOY.md](docs/DEPLOY.md) for the runbook). Getting there surfaced two
-more real bugs, not just infra clicking: a `.vercelignore` was needed to stop
-Vercel's build from mis-detecting the Python backend as the thing to deploy,
-and a production-only hang traced to `draft_proposal`'s JSON response getting
-truncated once `open_questions` grew into a structured field — both are in
-[docs/BACKLOG.md](docs/BACKLOG.md). The live link runs real keys, so
-`POST /runs` is capped per-IP + globally per day (`backend/app/rate_limit.py`)
-so a stranger can't run up a bill; the owner bypasses it via a token kept only
-in their own browser's `localStorage`, never in the repo or the public bundle.
+[docs/DEPLOY.md](docs/DEPLOY.md) for the runbook).
 
-**Not yet done:** prompt tuning for one-liners/category-fit is still open.
+**Next up:** prompt tuning for company one-liners and the category-fit
+check, to ensure companies are properly assigned a value chain position.
 
 See [docs/PRD.md](docs/PRD.md) for the full spec and
 [docs/BACKLOG.md](docs/BACKLOG.md) for the complete history of what changed
