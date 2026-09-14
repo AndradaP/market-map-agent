@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     # backstop against IP rotation. See backend/app/rate_limit.py.
     daily_run_limit_per_ip: Optional[int] = None
     daily_run_limit_global: Optional[int] = None
+    # A shared secret only the owner knows, set once in their own browser's
+    # localStorage (never checked into git or built into the public JS bundle)
+    # -- a request carrying it skips the cap entirely. None = no bypass exists.
+    rate_limit_bypass_token: Optional[SecretStr] = None
 
     @property
     def stubs_enabled(self) -> bool:

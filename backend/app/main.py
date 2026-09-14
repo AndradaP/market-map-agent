@@ -91,15 +91,22 @@ def healthz() -> Dict[str, Any]:
     return {"ok": True, **_ctx.get("meta", {})}
 
 
+def _is_owner(request: Request, settings) -> bool:
+    token = settings.rate_limit_bypass_token
+    return bool(token) and request.headers.get("x-owner-token") == token.get_secret_value()
+
+
 @app.post("/runs")
 def create_run(body: CreateRun, request: Request) -> Dict[str, Any]:
-    try:
-        check_and_record(client_ip(request), get_settings())
-    except RateLimitExceeded as exc:
-        raise HTTPException(
-            429,
-            f"Daily demo limit reached ({exc.scope}: {exc.limit}/day). Try again tomorrow.",
-        )
+    settings = get_settings()
+    if not _is_owner(request, settings):
+        try:
+            check_and_record(client_ip(request), settings)
+        except RateLimitExceeded as exc:
+            raise HTTPException(
+                429,
+                f"Daily demo limit reached ({exc.scope}: {exc.limit}/day). Try again tomorrow.",
+            )
     run_id = uuid4().hex
     cfg = {"configurable": {"thread_id": run_id}}
     result = _ctx["graph"].invoke({"topic": body.topic, "run_id": run_id}, cfg)
