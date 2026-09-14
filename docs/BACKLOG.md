@@ -182,8 +182,44 @@ Not for `main`. Tracks what's done and what's next. Pairs with
       discards a dead connection and serves a fresh one. Verified live:
       manually killed a connection the pool was holding mid-session; the
       next checkpoint operation succeeded anyway.
-- [ ] Deploy: Dockerfile + backend on Railway or Render; frontend on Vercel.
-      Not started — no hosting accounts/CLIs set up yet on this machine.
+- [x] **Deployed.** Backend on Railway (`Procfile`, live keys), frontend on
+      Vercel (React build, `VITE_API_BASE` pointed at Railway). Getting there
+      surfaced its own real bugs, not just clicking through a wizard:
+      - Vercel's zero-config build kept detecting `backend/app/main.py` as a
+        FastAPI entrypoint and failing the frontend-only deploy, even with
+        Root Directory set to `frontend` and "include files outside the root
+        directory" turned off — neither actually stopped it from scanning
+        the whole cloned repo. Fixed with a `.vercelignore` excluding
+        `backend/`, `requirements.txt`, `Procfile`, `supabase/`, `docs/`,
+        `.venv/` outright; confirmed by re-importing the project fresh
+        (Application Preset correctly auto-detected as Vite once the Python
+        code was never visible to begin with).
+      - **Real production hang, found live on the actual deployed demo**:
+        submitting a topic hung ~12 minutes then crashed with
+        `json.decoder.JSONDecodeError: Unterminated string`. `llm._json_call`
+        hardcoded `max_tokens=2000` for every structured call — fine when
+        `open_questions` was a plain string list, not once it became
+        `{question, affects, options}` (up to 3 × 4 options) plus the two
+        explicit scoping-call requirements added to `notes`. A real
+        `draft_proposal` response for a topic with several layers now
+        genuinely runs past 2000 tokens and gets cut off mid-string; tenacity
+        and LangGraph's own node retry both kept re-running the same
+        too-small budget. Bumped to 4096; confirmed live afterward with a
+        full, well-formed proposal in ~53s.
+      - **Public cost guardrail**: a live-key public link means a stranger
+        can spend real Anthropic/Exa credits, so `POST /runs` is gated by
+        `rate_limit.py` — per-IP daily cap (default demo: 2/day) plus a
+        global backstop against IP rotation — before the graph is ever
+        invoked. In-memory by design (single-instance demo; resets on
+        redeploy, a stated tradeoff not a gap). Also found: the cap
+        correctly still counts a crashed/errored attempt (money was already
+        spent on the API call even though the response was malformed) — but
+        that meant the owner testing their own public link got capped like
+        any stranger. Added a header-carried bypass token
+        (`RATE_LIMIT_BYPASS_TOKEN` on the backend, set once via
+        `localStorage.setItem("mm_owner_token", ...)` in the owner's own
+        browser — never checked into git or built into the public JS
+        bundle) that skips the cap entirely for that request.
 
 ### M3 — eval
 - [ ] Eval harness that reads the run log.

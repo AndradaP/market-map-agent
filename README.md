@@ -1,5 +1,7 @@
 # Andra's Market Map Agent
 
+**Live demo:** [market-map-agent.vercel.app](https://market-map-agent.vercel.app) — runs real Anthropic + Exa keys, gated behind a small daily cap so a public link can't run up a bill (see Status below).
+
 A significant part of my role as Innovation Associate consists of conducting needfinding with corporate venture partners around their companies' innovation priorities and sourcing pilot-ready startups they can deploy to bolster operations or meet EGS goals.
 
 Building **value chains** (the stages a space moves through) and **market maps** (real companies at each stage) are exercises I've gone through to better understand where different tech is today and where it's headed.  
@@ -59,17 +61,25 @@ in [docs/PRD.md](docs/PRD.md) and [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ## Status
 
-The full loop is real and has been run against live Anthropic + Exa keys across a dozen topics spanning very different fields (energy, AI infrastructure, dev tools, security, SEO-adjacent markets), not just smoke-tested once. Corroboration, extraction, and the scope contract have all been revised at least once based on that live evidence, not just designed up front. 70+ tests passing.
+The full loop is real and has been run against live Anthropic + Exa keys across a dozen topics spanning very different fields (energy, AI infrastructure, dev tools, security, SEO-adjacent markets), not just smoke-tested once. Corroboration, extraction, and the scope contract have all been revised at least once based on that live evidence, not just designed up front. 80+ tests passing.
 
 The React frontend has since been run end-to-end against the live backend
 (not just built and left untouched) — first-run UX gaps found that way are
 fixed, and `open_questions` is now a structured, clickable field rather than
 plain text.
 
+**Deployed** — backend on Railway, frontend on Vercel (see
+[docs/DEPLOY.md](docs/DEPLOY.md) for the runbook). Getting there surfaced two
+more real bugs, not just infra clicking: a `.vercelignore` was needed to stop
+Vercel's build from mis-detecting the Python backend as the thing to deploy,
+and a production-only hang traced to `draft_proposal`'s JSON response getting
+truncated once `open_questions` grew into a structured field — both are in
+[docs/BACKLOG.md](docs/BACKLOG.md). The live link runs real keys, so
+`POST /runs` is capped per-IP + globally per day (`backend/app/rate_limit.py`)
+so a stranger can't run up a bill; the owner bypasses it via a token kept only
+in their own browser's `localStorage`, never in the repo or the public bundle.
+
 **Not yet done:** prompt tuning for one-liners/category-fit is still open.
-Not deployed yet — deploy configs and a step-by-step runbook are ready in
-[docs/DEPLOY.md](docs/DEPLOY.md) (Railway for the backend, Vercel for the
-frontend, running in stub mode so a public link can't spend API credits).
 
 See [docs/PRD.md](docs/PRD.md) for the full spec and
 [docs/BACKLOG.md](docs/BACKLOG.md) for the complete history of what changed
@@ -94,7 +104,7 @@ run log/checkpointer/registry instead of local files), and set
 
 ```bash
 .venv/bin/uvicorn backend.app.main:app --reload      # API on :8000
-cd frontend && npm install && npm run dev            # form on :5173 -- unverified, see Status
+cd frontend && npm install && npm run dev            # form on :5173
 ```
 
 
@@ -102,12 +112,13 @@ cd frontend && npm install && npm run dev            # form on :5173 -- unverifi
 ## Layout
 
 ```
-backend/app/         state schema, graph, six nodes, llm/search/sources/registry, FastAPI
+backend/app/         state schema, graph, six nodes, llm/search/sources/registry, rate_limit, FastAPI
 backend/scripts/     run_local.py, demo_rescope_cap.py
-backend/tests/       70+ tests
-frontend/            React + Vite -- topic input -> proposal review -> map (untested against live backend)
+backend/tests/       80+ tests
+frontend/            React + Vite -- topic input -> proposal review -> map (deployed, Vercel)
 supabase/migrations/ run-log table, company registry table
 docs/PRD.md          product spec + full corroboration-model rationale
-docs/BACKLOG.md       complete history: what shipped, what broke live, what changed and why
+docs/BACKLOG.md      complete history: what shipped, what broke live, what changed and why
+docs/DEPLOY.md        Railway + Vercel deploy runbook
 ```
 

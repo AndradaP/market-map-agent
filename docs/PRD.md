@@ -235,7 +235,7 @@ gap someone will discover.
 |---|---|---|
 | **M0** | Skeleton *(done)* | Full loop wired, rescope cap, tracing, checkpointer, run log, FastAPI, frontend, offline stubs, tests. |
 | **M1** | Real pipeline | Live keys; real Exa company extraction (name + URL, not domain grouping); prompt tuning starting with Propose; first real runs. |
-| **M2** | Product surface | Frontend against a live backend *(done)*; Supabase wired *(done)*; deploy *(not started — no hosting accounts set up)*. |
+| **M2** | Product surface | Frontend against a live backend *(done)*; Supabase wired *(done)*; deployed *(done)* — backend on Railway, frontend on Vercel, live public keys gated behind a daily per-IP + global run cap. |
 | **M3** | Eval | Harness off the run log; iterate scope quality and company precision. |
 
 ## 11. Open questions
