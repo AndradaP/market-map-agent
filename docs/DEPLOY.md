@@ -1,9 +1,14 @@
 # Deploying the public demo
 
-The public link runs in **stub mode** — deterministic, offline, zero API cost.
-Anyone with the link gets the full UI/UX (topic → proposal → confirm/edit →
-final map) with no risk of burning your Anthropic/Exa credits. Live-key runs
-stay local, for your own demos.
+The public link runs **real** Anthropic + Exa keys — a stub-only demo shows
+the UI but not the thing this project is actually about (real, source-verified
+companies). To keep that affordable with strangers on the link, a daily cap
+gates it before a single dollar is spent: see [rate_limit.py](../backend/app/rate_limit.py)
+— per-IP (one visitor can't eat the whole day's budget) plus a global
+backstop (in case of IP rotation), both enforced in `POST /runs` before the
+graph is invoked. Recommended starting point: 2/day per IP, ~10-20/day
+global — cheap even in the worst case, and "I don't expect a lot of users"
+makes the realistic case cheaper still.
 
 Two pieces, deployed separately: backend (FastAPI) on Railway, frontend
 (React/Vite) on Vercel.
@@ -15,15 +20,23 @@ Two pieces, deployed separately: backend (FastAPI) on Railway, frontend
 2. Railway auto-detects Python via `requirements.txt` and the root
    [`Procfile`](../Procfile) (`web: uvicorn backend.app.main:app --host 0.0.0.0
    --port $PORT`) — no build config needed.
-3. Set exactly one environment variable under the service's **Variables** tab:
+3. Set these environment variables under the service's **Variables** tab:
    ```
-   USE_STUBS=true
+   USE_STUBS=false
+   ANTHROPIC_API_KEY=<your real key>
+   EXA_API_KEY=<your real key>
+   DAILY_RUN_LIMIT_PER_IP=2
+   DAILY_RUN_LIMIT_GLOBAL=15
    ```
-   Leave `ANTHROPIC_API_KEY`, `EXA_API_KEY`, `LANGSMITH_API_KEY`, and
-   `DATABASE_URL` unset. Without a `DATABASE_URL` the checkpointer falls back
+   `LANGSMITH_API_KEY` and `DATABASE_URL` are optional — leave both unset for
+   the simplest deploy. Without a `DATABASE_URL` the checkpointer falls back
    to in-memory (per the `build_checkpointer` branch in
-   `backend/app/checkpointer.py`) and the run log / company registry no-op —
-   fine for a stub-only demo; state just doesn't survive a restart.
+   `backend/app/checkpointer.py`) and the run log / company registry no-op;
+   fine for a demo, just means state doesn't survive a restart and the rate
+   limit counters reset on redeploy too (in-memory, see `rate_limit.py`).
+   Set `DATABASE_URL` to the same Supabase instance from local dev if you want
+   the registry/run-log to persist across restarts — the rate limiter itself
+   stays in-memory either way, by design (see its module docstring).
 4. Deploy. Railway gives you a public URL like
    `https://market-map-agent-production.up.railway.app`. Sanity check:
    ```

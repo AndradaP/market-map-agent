@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.types import Command
 from pydantic import BaseModel
@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from .checkpointer import build_checkpointer
 from .config import get_settings
 from .graph import build_graph
+from .rate_limit import RateLimitExceeded, check_and_record, client_ip
 from .tracing import configure_tracing
 
 _ctx: Dict[str, Any] = {}
@@ -91,7 +92,14 @@ def healthz() -> Dict[str, Any]:
 
 
 @app.post("/runs")
-def create_run(body: CreateRun) -> Dict[str, Any]:
+def create_run(body: CreateRun, request: Request) -> Dict[str, Any]:
+    try:
+        check_and_record(client_ip(request), get_settings())
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            429,
+            f"Daily demo limit reached ({exc.scope}: {exc.limit}/day). Try again tomorrow.",
+        )
     run_id = uuid4().hex
     cfg = {"configurable": {"thread_id": run_id}}
     result = _ctx["graph"].invoke({"topic": body.topic, "run_id": run_id}, cfg)

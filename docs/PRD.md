@@ -218,6 +218,16 @@ pause durable across processes); the run log is the intentional record.
 ### Hosting
 Frontend on Vercel. Backend needs an always-on host (Railway / Render / Fly) —
 runs are long and pause mid-execution, which serverless does not handle well.
+Deploy configs and a step-by-step runbook are in docs/DEPLOY.md.
+
+A public link runs real Anthropic + Exa keys against `POST /runs`, so a
+stranger can spend real money. `backend/app/rate_limit.py` gates every new
+run behind a daily cap — per-IP (one visitor can't eat the whole day's
+budget) plus a global backstop against IP rotation — before the graph is
+invoked at all. Off by default (`None`/`None`); the public deploy sets both
+via env vars. In-memory, not Postgres-backed: the demo is a single instance,
+so counts reset on redeploy — a deliberate, stated simplification, not a
+gap someone will discover.
 
 ## 10. Milestones
 

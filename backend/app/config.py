@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     # Rescope-note quality floor (chars) before the one free clarification round.
     rescope_min_note_chars: int = 15
 
+    # Public-deploy cost guardrail: caps on new runs ("maps") per calendar day.
+    # None = disabled (local dev / tests). The public deploy sets both --
+    # per-IP so one stranger can't eat the whole day's budget, global as a
+    # backstop against IP rotation. See backend/app/rate_limit.py.
+    daily_run_limit_per_ip: Optional[int] = None
+    daily_run_limit_global: Optional[int] = None
+
     @property
     def stubs_enabled(self) -> bool:
         """Deterministic offline mode: explicit opt-in, or any live key missing."""
