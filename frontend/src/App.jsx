@@ -69,7 +69,7 @@ export default function App() {
 }
 
 function TopicForm({ onSubmit }) {
-  const [topic, setTopic] = useState("AI observability");
+  const [topic, setTopic] = useState("");
   return (
     <form
       onSubmit={(e) => {
