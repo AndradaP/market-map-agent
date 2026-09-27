@@ -111,6 +111,7 @@ function looksLikeDirectEdit(notes, layers) {
 function ProposalReview({ review, onSend }) {
   const p = review.proposal;
   const minChars = review.min_note_chars ?? 15;
+  const totalAttempts = review.rescope_cap + 1;
 
   const [layers, setLayers] = useState(p.layers);
   const [defs, setDefs] = useState({ ...p.layer_definitions });
@@ -119,24 +120,33 @@ function ProposalReview({ review, onSend }) {
   const [dropped, setDropped] = useState([]); // {name, definition} awaiting a "widen sibling" decision
   const [normalize, setNormalize] = useState(false);
 
-  const [rescopeNotes, setRescopeNotes] = useState("");
-  const [differentTopic, setDifferentTopic] = useState(false);
+  // Picked answers and free-typed notes are kept separate on purpose: an
+  // earlier version wrote picks straight into the same textarea a user could
+  // also type in, so picking an answer silently overwrote anything they'd
+  // typed (and vice versa). Keeping them apart and joining only at submit
+  // time means neither can clobber the other.
   const [answers, setAnswers] = useState({}); // question index -> chosen option
+  const [customNotes, setCustomNotes] = useState("");
+  const [differentTopic, setDifferentTopic] = useState(false);
 
-  const pickAnswer = (i, question, option) => {
-    const next = { ...answers, [i]: option };
-    setAnswers(next);
-    setRescopeNotes(
-      Object.entries(next)
-        .map(([idx, opt]) => `${p.open_questions[idx].question} -> ${opt}`)
-        .join(" ")
-    );
+  const pickAnswer = (i, option) => {
+    setAnswers((prev) => {
+      const next = { ...prev };
+      if (next[i] === option) delete next[i]; // click again to un-pick
+      else next[i] = option;
+      return next;
+    });
   };
+
+  const pickedLines = Object.entries(answers).map(
+    ([idx, opt]) => `${p.open_questions[idx].question} -> ${opt}`
+  );
+  const rescopeNotes = [...pickedLines, customNotes.trim()].filter(Boolean).join(" ");
 
   const capText = review.direct_edit_only
     ? review.handoff_message
-    : `Rescope requests: ${review.rescopes_remaining} of ${review.rescope_cap} left. ` +
-      `A rescope asks the model to try again (costs one attempt). Direct edits below are free and unlimited.`;
+    : `Attempt ${review.attempt} of ${totalAttempts} for this run. Edits above are free ` +
+      `and unlimited; requesting a rescope below spends one of the ${review.rescope_cap} left.`;
 
   const editLayer = (i, v) => setLayers(layers.map((l, j) => (j === i ? v : l)));
   const editDef = (name, v) => setDefs({ ...defs, [name]: v });
@@ -171,23 +181,33 @@ function ProposalReview({ review, onSend }) {
     zoom_level: zoom,
   });
 
-  const submitDirect = () =>
+  // Always sends the CURRENT field values, whether or not anything was
+  // touched -- there used to be a separate "Confirm as-is" button that sent
+  // edited_scope: null instead, which meant it silently discarded any inline
+  // edit you'd made with no warning. One button, always the live values:
+  // if nothing was touched, the live values already equal the proposal, so
+  // behavior is unchanged for that case and safe for the other.
+  const continueWithCurrentFields = () =>
     onSend({ type: "direct_edit", notes: "", different_topic: false, edited_scope: editedScope(), normalize });
 
   const actionable = noteIsActionable(rescopeNotes, layers, minChars);
   const suggestDirect = looksLikeDirectEdit(rescopeNotes, layers);
+  const notePreview =
+    customNotes.trim().length > 70 ? `${customNotes.trim().slice(0, 70)}…` : customNotes.trim();
 
   return (
     <section>
       <p className="cap">{capText}</p>
       {p.notes && <p className="notes">Note from the model: {p.notes}</p>}
 
-      <h2>Proposed layers (attempt {review.attempt})</h2>
+      <h2>Structure</h2>
       <ol>
         {layers.map((l, i) => (
           <li key={i}>
-            <input value={l} onChange={(e) => editLayer(i, e.target.value)} />
-            <button type="button" onClick={() => dropLayer(i)}>drop</button>
+            <div className="layerrow">
+              <input value={l} onChange={(e) => editLayer(i, e.target.value)} />
+              <button type="button" onClick={() => dropLayer(i)}>drop</button>
+            </div>
             <textarea
               className="defedit"
               value={defs[l] ?? ""}
@@ -248,60 +268,60 @@ function ProposalReview({ review, onSend }) {
         </div>
       </div>
 
-      {p.open_questions?.length > 0 && (
-        <>
-          <h3>Open questions from the model</h3>
-          <p className="hint">
-            Pick an answer below to draft a rescope note for it — no need to already know the
-            terminology, just choose the option you want.
-          </p>
-          <ul className="openq">
-            {p.open_questions.map((q, i) => (
-              <li key={i}>
-                {q.affects && <span className="badge">{q.affects}</span>} {q.question}
-                {q.options?.length > 0 && (
-                  <div className="openq-options">
-                    {q.options.map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        className={answers[i] === opt ? "picked" : ""}
-                        onClick={() => pickAnswer(i, q, opt)}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-
       <div className="actions">
-        <button onClick={() => onSend({ type: "none", notes: "", different_topic: false, edited_scope: null })}>
-          Confirm as-is
-        </button>
-        <button onClick={submitDirect}>Save my direct edits &amp; continue</button>
+        <button onClick={continueWithCurrentFields}>Continue with this structure</button>
         <label className="check">
           <input type="checkbox" checked={normalize} onChange={(e) => setNormalize(e.target.checked)} />
-          Tidy my layer names &amp; order (one cheap model pass, not a rescope)
+          Also tidy layer names &amp; order first (one cheap model pass, not a rescope)
         </label>
       </div>
 
       {!review.direct_edit_only && (
         <div className="rescope">
-          <h3>Something fundamentally wrong? Ask the model to rescope</h3>
+          <h3>Something more fundamental to change?</h3>
+          <p className="hint">
+            Pick an answer below and/or write your own note — either way, nothing is sent until
+            you click "Request rescope" at the bottom. Editing layers above and clicking
+            "Continue" is free and separate from this; this section asks the model to try again.
+          </p>
+
+          {p.open_questions?.length > 0 && (
+            <ul className="openq">
+              {p.open_questions.map((q, i) => (
+                <li key={i}>
+                  {q.affects && <span className="badge">{q.affects}</span>} {q.question}
+                  {q.options?.length > 0 && (
+                    <div className="openq-options">
+                      {q.options.map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          className={answers[i] === opt ? "picked" : ""}
+                          onClick={() => pickAnswer(i, opt)}
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {pickedLines.length > 0 && (
+            <p className="hint">Picked so far: {pickedLines.join(" · ")}</p>
+          )}
+
           <textarea
-            value={rescopeNotes}
-            onChange={(e) => setRescopeNotes(e.target.value)}
-            placeholder="Say what's wrong AND what you'd expect — e.g. 'batteries and charging are lumped together; charging infra should be its own stage'."
+            value={customNotes}
+            onChange={(e) => setCustomNotes(e.target.value)}
+            placeholder="Add your own reasoning, or say what's wrong AND what you'd expect — e.g. 'batteries and charging are lumped together; charging infra should be its own stage'."
           />
           {suggestDirect && (
             <p className="hint">
-              That sounds like something you can do yourself above (rename / drop / add a layer) —
-              a direct edit is free and doesn't cost a rescope.
+              “{notePreview}” sounds like something you can do yourself above (rename / drop /
+              add a layer) — that's free and doesn't spend an attempt.
             </p>
           )}
           {!actionable && rescopeNotes.trim().length > 0 && (
@@ -316,7 +336,8 @@ function ProposalReview({ review, onSend }) {
               checked={differentTopic}
               onChange={(e) => setDifferentTopic(e.target.checked)}
             />
-            This is actually a different topic (re-runs research from scratch)
+            This is actually a different topic — starts over from scratch (uses one of today's
+            fresh-map attempts, not a rescope attempt)
           </label>
           <button
             disabled={!rescopeNotes.trim()}

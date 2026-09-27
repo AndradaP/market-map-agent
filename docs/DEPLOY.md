@@ -6,7 +6,7 @@ companies). To keep that affordable with strangers on the link, a daily cap
 gates it before a single dollar is spent: see [rate_limit.py](../backend/app/rate_limit.py)
 — per-IP (one visitor can't eat the whole day's budget) plus a global
 backstop (in case of IP rotation), both enforced in `POST /runs` before the
-graph is invoked. Recommended starting point: 2/day per IP, ~10-20/day
+graph is invoked. Recommended starting point: 3/day per IP, ~10-20/day
 global — cheap even in the worst case, and "I don't expect a lot of users"
 makes the realistic case cheaper still.
 
@@ -25,7 +25,7 @@ Two pieces, deployed separately: backend (FastAPI) on Railway, frontend
    USE_STUBS=false
    ANTHROPIC_API_KEY=<your real key>
    EXA_API_KEY=<your real key>
-   DAILY_RUN_LIMIT_PER_IP=2
+   DAILY_RUN_LIMIT_PER_IP=3
    DAILY_RUN_LIMIT_GLOBAL=15
    ```
    `LANGSMITH_API_KEY` and `DATABASE_URL` are optional — leave both unset for

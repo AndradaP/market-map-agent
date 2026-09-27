@@ -208,7 +208,9 @@ Not for `main`. Tracks what's done and what's next. Pairs with
         full, well-formed proposal in ~53s.
       - **Public cost guardrail**: a live-key public link means a stranger
         can spend real Anthropic/Exa credits, so `POST /runs` is gated by
-        `rate_limit.py` — per-IP daily cap (default demo: 2/day) plus a
+        `rate_limit.py` — per-IP daily cap (tuned after live testing to
+        3/day: 1 fresh topic + up to 2 "different topic" rescopes, matching
+        rescope_cap) plus a
         global backstop against IP rotation — before the graph is ever
         invoked. In-memory by design (single-instance demo; resets on
         redeploy, a stated tradeoff not a gap). Also found: the cap
@@ -220,6 +222,64 @@ Not for `main`. Tracks what's done and what's next. Pairs with
         `localStorage.setItem("mm_owner_token", ...)` in the owner's own
         browser — never checked into git or built into the public JS
         bundle) that skips the cap entirely for that request.
+      - **Rate-limit loophole, found from real usage**: only `POST /runs` was
+        ever gated. A `rescope_request` with `different_topic=True` re-runs
+        Recon + Propose from scratch — the same cost profile as a brand-new
+        run — but wasn't metered at all, since it goes through
+        `POST /runs/{id}/respond`, not `/runs`. A same-topic rescope must
+        stay free (governed only by `rescope_cap`), but hopping to an
+        entirely new topic via that checkbox is exactly as expensive as the
+        "Start a new market map" button and now costs the same daily-cap
+        slot regardless of which one gets you there.
+      - **Separate real bug found chasing the above**: `run_log.write_run_log`
+        gated only on `settings.database_url`, never on stub mode — unlike
+        `registry.py`, which already checked `stubs_enabled` first. Any
+        offline/stub run with a real `DATABASE_URL` sitting in a dev's
+        `.env` (exactly this dev's local `.env`) silently wrote rows into
+        the real production `market_map_runs` table; it's also what made
+        the test suite itself start failing (DNS resolution to the real
+        Supabase host from a sandboxed test run). Fixed, and hardened
+        `conftest.py`, which popped secret env vars rather than overriding
+        them — popping doesn't stop pydantic-settings from still reading an
+        absent key straight out of `.env`.
+      - **In-memory checkpointer wipes in-progress runs on every redeploy** —
+        found live: a user's in-progress run 404'd ("unknown run") right
+        after a backend redeploy for an unrelated fix. Not a bug relative to
+        the documented tradeoff (`checkpointer: memory` was a deliberate
+        simplicity choice), but a real, surfaced cost of it once redeploys
+        started happening mid-session. Open decision: point Railway's
+        `DATABASE_URL` at the same Supabase instance local dev already uses,
+        for a durable `PostgresSaver` in production too.
+- [x] **Confirm-screen UX pass**, driven by real usage of the deployed demo
+      (not a guess at what might be confusing). Found and fixed:
+      - **A silent-discard bug, not just confusing copy**: "Confirm as-is"
+        sent `edited_scope: null`, discarding any inline edit — including an
+        accidental one — with no warning. Collapsed "Confirm as-is" and
+        "Save my direct edits" into one "Continue" button that always
+        submits the current field values; identical behavior when nothing
+        was touched, safe when something was. Verified live: renamed a
+        layer, clicked Continue, the renamed layer carried through to the
+        final map.
+      - **Open questions and the free-form rescope note were the same field
+        wearing two headers** — picking an answer wrote straight into the
+        same textarea the "something fundamentally wrong" section showed,
+        with no indication they were connected. Merged into one section;
+        while fixing it, found picking an answer would silently overwrite
+        anything already typed (and vice versa) — split into a separate
+        `answers` (picks) and `customNotes` (free text) state, joined only
+        at submit time, so neither can clobber the other. Picks are also
+        now toggleable (click again to un-pick), which they weren't before.
+      - Reworded the attempt-count copy to state the total directly
+        ("Attempt 1 of 3") instead of a remaining-count a reader had to do
+        `cap + 1` math on to understand.
+      - The "different topic" checkbox's label now says which cap it
+        spends (today's fresh-map limit, not a rescope attempt) — directly
+        answers the confusion that led to finding the rate-limit loophole
+        above.
+      - Layout: `drop` moved beside the layer name instead of on its own
+        line below it (shorter, less scrolling); page width widened
+        820px → 960px (was mostly empty margin on an actual desktop
+        screen).
 
 ### M3 — eval
 - [ ] Eval harness that reads the run log.
