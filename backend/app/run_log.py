@@ -71,7 +71,13 @@ on conflict (run_id) do nothing;
 
 
 def write_run_log(record: Dict[str, Any], settings: Settings) -> Dict[str, Any]:
-    if settings.database_url:
+    # Stub mode always uses the local file, regardless of DATABASE_URL --
+    # found live via a failing test: a real DATABASE_URL sitting in a dev's
+    # .env meant every offline/stub run (including the whole test suite)
+    # silently wrote rows into the REAL production market_map_runs table.
+    # registry.py already gated its own Postgres path on stubs_enabled first;
+    # this one never did.
+    if settings.database_url and not settings.stubs_enabled:
         import psycopg
         from psycopg.types.json import Jsonb
 

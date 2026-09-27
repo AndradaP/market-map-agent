@@ -88,7 +88,17 @@ def _shape(result: Dict[str, Any], run_id: str) -> Dict[str, Any]:
 
 @app.get("/healthz")
 def healthz() -> Dict[str, Any]:
-    return {"ok": True, **_ctx.get("meta", {})}
+    settings = get_settings()
+    return {
+        "ok": True,
+        **_ctx.get("meta", {}),
+        # Diagnostic only -- never the token/limit *values* being wrong in a way
+        # that's hard to see from outside, just whether they're configured at
+        # all. Real debugging aid after "the owner bypass isn't working".
+        "daily_run_limit_per_ip": settings.daily_run_limit_per_ip,
+        "daily_run_limit_global": settings.daily_run_limit_global,
+        "owner_bypass_configured": bool(settings.rate_limit_bypass_token),
+    }
 
 
 def _is_owner(request: Request, settings) -> bool:
@@ -113,12 +123,31 @@ def create_run(body: CreateRun, request: Request) -> Dict[str, Any]:
     return _shape(result, run_id)
 
 
+def _is_fresh_map_request(body: RespondBody) -> bool:
+    """A 'different topic' rescope re-runs Recon + Propose from scratch --
+    the same cost profile as POST /runs, just entered from inside an
+    existing run instead of the topic screen. Without this, it's a free
+    way around the daily cap: narrow the same topic all you want (governed
+    by rescope_cap instead), but starting over on a new subject counts the
+    same regardless of which button got you there."""
+    return body.type == "rescope_request" and body.different_topic
+
+
 @app.post("/runs/{run_id}/respond")
-def respond(run_id: str, body: RespondBody) -> Dict[str, Any]:
+def respond(run_id: str, body: RespondBody, request: Request) -> Dict[str, Any]:
     cfg = {"configurable": {"thread_id": run_id}}
     snap = _ctx["graph"].get_state(cfg)
     if not snap.created_at:
         raise HTTPException(404, f"unknown run {run_id}")
+    settings = get_settings()
+    if _is_fresh_map_request(body) and not _is_owner(request, settings):
+        try:
+            check_and_record(client_ip(request), settings)
+        except RateLimitExceeded as exc:
+            raise HTTPException(
+                429,
+                f"Daily demo limit reached ({exc.scope}: {exc.limit}/day). Try again tomorrow.",
+            )
     result = _ctx["graph"].invoke(Command(resume=body.model_dump()), cfg)
     return _shape(result, run_id)
 
