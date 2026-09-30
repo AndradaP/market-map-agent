@@ -2,7 +2,7 @@
 
 **Live demo:** [market-map-agent.vercel.app](https://market-map-agent.vercel.app) — runs real Anthropic + Exa keys, gated behind a small daily cap so a public link can't run up a bill (see Status below).
 
-A significant part of my role as Innovation Associate consists of conducting needfinding with corporate venture partners around their companies' innovation priorities and sourcing pilot-ready startups they can deploy to bolster operations or meet EGS goals.
+A significant part of my role as Innovation Associate consists of conducting needfinding with corporate venture partners around their companies' innovation priorities and sourcing pilot-ready startups they can deploy to bolster operations or meet ESG goals.
 
 Building **value chains** (the stages a space moves through) and **market maps** (real companies at each stage) are exercises I've gone through to better understand where different tech is today and where it's headed.  
   
@@ -12,7 +12,7 @@ Scoping and building the value chain is the first bottleneck I've identified, wh
 
 ## How it works
 
-A six-node [LangGraph](https://langchain-ai.github.io/langgraph/) loop:
+A six-node [LangGraph](https://langchain-ai.github.io/langgraph/) workflow: the code sets the path, the model does the judgment work inside each step.
 
 
 | Node               | Does                                                                                                                                                                                                                                                                                               |
@@ -31,7 +31,7 @@ A six-node [LangGraph](https://langchain-ai.github.io/langgraph/) loop:
 
 How might we trust outputs and avoid "AI slop" when building market maps across different industries? Each company or player that shows up on the market map is verified using **≥2 independent, non-junk sources**. "Junk" is defined as a short, field-agnostic list, including a company's own domain, PR wires, code/package hosts, which holds up across any field, unlike an infinite "credible outlets" list ever could.
 
-How might we trust these sources are secure and won't let SEO-swarm content-farm domains through undetected? Sources are checked against known threat-intel/blocklist patterns, and companies that clear the mechanical gate get one further, cheap LLM sanity pass asking whether the sources read as real coverage or generic noise. That check applies only to the small shortlist that already passed, so it stays inexpensive, and it fails *open* to never bury a company on its own hiccup.
+How might we trust these sources are secure and won't let SEO-swarm content-farm domains through undetected? If a company turns up in a phishing/malware blocklist feed, that overrides any corroboration and it is rejected. Companies that clear the mechanical gate get one further, cheap LLM sanity pass asking whether the sources read as real coverage or generic noise. That check applies only to the small shortlist that already passed, so it stays inexpensive, and it fails *open* to never bury a company on its own hiccup.
 
 A closer manual read of real outputs (not just metrics) surfaced a further layer of findings: the same real company was getting extracted independently by more than one layer and shown as a duplicate; the same company could score well under one topic and poorly under an adjacent one purely from search luck. Fixed with a canonical-URL dedup pass at Synthesize and a **persistent, cross-run company registry** (Postgres) that accumulates every independent
 source ever found for a company, keyed by domain, instead of starting from
@@ -61,7 +61,7 @@ in [docs/PRD.md](docs/PRD.md) and [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ## Status
 
-The full loop has been run against live Anthropic + Exa keys across a dozen topics spanning different fields (e.g., energy, AI infrastructure, dev tools, security, SEO-adjacent markets). Corroboration, extraction, and the scope contract have been revised at least once based on that live evidence.
+The full workflow has been run against live Anthropic + Exa keys across a dozen topics spanning different fields (e.g., energy, AI infrastructure, dev tools, security, SEO-adjacent markets). Corroboration, extraction, and the scope contract have been revised at least once based on that live evidence.
 
 **Deployed** — backend on Railway, frontend on Vercel (see
 [docs/DEPLOY.md](docs/DEPLOY.md) for the runbook).
