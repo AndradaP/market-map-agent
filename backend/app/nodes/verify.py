@@ -66,6 +66,9 @@ def verify_node(state: MarketMapState) -> dict:
                 layer,
                 defs.get(layer, ""),
                 miscategorized_hint=c.get("_miscategorized", False),
+                in_scope=scope.get("in_scope", []),
+                excluded=scope.get("excluded_adjacent", []),
+                guidance=scope.get("guidance", ""),
             )
             c["category_fit"] = fits
             if not fits:

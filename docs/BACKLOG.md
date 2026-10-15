@@ -280,6 +280,52 @@ Not for `main`. Tracks what's done and what's next. Pairs with
         line below it (shorter, less scrolling); page width widened
         820px → 960px (was mostly empty margin on an actual desktop
         screen).
+- [x] **Confirm-screen rework — the controls now bite.** The previous pass
+      tidied the screen but left the underlying problem: it presented three
+      different kinds of decision as if they were one, and two of them
+      reached nothing. Found by reading the code rather than guessing:
+      - `in_scope` / `excluded_adjacent` were read-only in the UI and never
+        referenced by `execute.py` or `verify.py` at all — they shaped
+        explanation prose and nothing else. So "are hyperscalers in scope?"
+        was a question you couldn't answer directly, and answering it via a
+        rescope changed the wording, not the map. They're now editable chips,
+        and they're passed into the category-fit check as **binding**: a
+        company matching an excluded entry is rejected even if it suits the
+        layer.
+      - Breadth didn't exist. `layer_company_hard_cap` was a global constant
+        applied identically to every layer, so "how wide should the operator
+        layer go: 10-15 / 30-50 / 100+?" was a question the system
+        structurally could not honour. Now `companies_per_layer` rides in the
+        confirmed scope and Execute uses it.
+      - Every open question funnelled into the rescope note and cost an
+        attempt — despite OPEN_DECISIONS.md #1 having specified the opposite
+        ("a question the user can't act on without sending it back to the
+        model is a rescope prompt in disguise"). The build had drifted from
+        its own spec. `open_questions` is now `{question (a SHORT label),
+        options: [{label, in_scope, excluded}], default}`: each renders as a
+        settings row preselected on the model's own choice, and switching
+        options swaps that option's chips in and the previous one's out, so
+        the answer is visible in the scope lists. Answering is free.
+      - New: a free-text `guidance` field for anything the controls don't
+        capture ("European players only"), which reaches both the per-layer
+        search query and the category-fit check, so it isn't a notes box that
+        goes nowhere.
+      - Structure: one rule replaces the explanatory copy — **anything in the
+        sticky header spends something, anything in the body is free.**
+        `Redraft` and `New map` live in the header next to the counter each
+        one spends; Continue is the only action in the body. "Attempt" was
+        doing two jobs and is gone, split into `map 2 of 3 today` and
+        `2 redrafts left`.
+      - Dropped "tidy my layer names & order" (`llm.normalize_scope`) and the
+        "this is actually a different topic" checkbox. The first was a niche
+        convenience costing a confusing control; the second is better served
+        by the always-visible `New map` button. The API still meters
+        `different_topic` for any client that sends it.
+      - Covered by `test_scope_controls_bite.py`, which pins the wiring that
+        was missing, and verified end-to-end in a browser: breadth `~50`,
+        a free-text answer and the catch-all steer all arrived in
+        `confirmed_scope` as `companies_per_layer: 50` and
+        `guidance: "Geography: EU only. Series A and later"`.
 
 ### M3 — eval
 - [ ] Eval harness that reads the run log.

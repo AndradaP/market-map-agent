@@ -45,6 +45,16 @@ def _prune_other_days(today: str) -> None:
         del _counts[k]
 
 
+def usage(ip: str, settings: Settings) -> Dict[str, Optional[int]]:
+    """Today's fresh-map count for this IP, for the header counter. Read
+    only -- never records. `limit` is None when no cap applies (locally, or
+    for the owner), which the UI renders as unlimited rather than as 0."""
+    today = date.today().isoformat()
+    with _lock:
+        used = _counts.get((today, ip), 0)
+    return {"used": used, "limit": settings.daily_run_limit_per_ip}
+
+
 def check_and_record(ip: str, settings: Settings) -> None:
     """Raise RateLimitExceeded if today's cap is already hit; otherwise record
     this run against both counters. Call once per new run, before it starts."""

@@ -40,7 +40,16 @@ def test_fully_populated_response_is_passed_through_unchanged(monkeypatch):
         "in_scope": ["x"],
         "excluded_adjacent": ["y"],
         "zoom_level": "category",
-        "open_questions": [{"question": "q?", "affects": "A", "options": ["yes", "no"]}],
+        "open_questions": [
+            {
+                "question": "Incumbents",
+                "options": [
+                    {"label": "include", "in_scope": ["incumbents"], "excluded": []},
+                    {"label": "exclude", "in_scope": [], "excluded": ["incumbents"]},
+                ],
+                "default": 0,
+            }
+        ],
         "notes": "n",
     }
     monkeypatch.setattr(llm, "_json_call", lambda *a, **kw: dict(full))
@@ -49,14 +58,29 @@ def test_fully_populated_response_is_passed_through_unchanged(monkeypatch):
     assert out == full
 
 
-def test_legacy_plain_string_open_question_is_normalized(monkeypatch):
+def test_legacy_plain_string_open_question_becomes_a_free_text_row(monkeypatch):
+    # An older cached proposal must still render rather than crash the screen.
     monkeypatch.setattr(
         llm,
         "_json_call",
         lambda *a, **kw: {"open_questions": ["is this in scope?"]},
     )
     out = llm.draft_proposal(topic="t", recon_results=[], settings=REAL)
-    assert out["open_questions"] == [{"question": "is this in scope?", "affects": "", "options": []}]
+    assert out["open_questions"] == [
+        {"question": "is this in scope?", "options": [], "default": None}
+    ]
+
+
+def test_legacy_string_options_survive_with_no_scope_effect(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "_json_call",
+        lambda *a, **kw: {"open_questions": [{"question": "Incumbents", "options": ["in", "out"]}]},
+    )
+    out = llm.draft_proposal(topic="t", recon_results=[], settings=REAL)
+    q = out["open_questions"][0]
+    assert [o["label"] for o in q["options"]] == ["in", "out"]
+    assert q["options"][0]["in_scope"] == [] and q["options"][0]["excluded"] == []
 
 
 def test_open_questions_are_capped_at_three_and_options_at_four(monkeypatch):
@@ -65,7 +89,7 @@ def test_open_questions_are_capped_at_three_and_options_at_four(monkeypatch):
         "_json_call",
         lambda *a, **kw: {
             "open_questions": [
-                {"question": f"q{i}", "affects": "", "options": ["a", "b", "c", "d", "e"]}
+                {"question": f"q{i}", "options": [{"label": x} for x in "abcde"]}
                 for i in range(5)
             ]
         },
@@ -75,11 +99,38 @@ def test_open_questions_are_capped_at_three_and_options_at_four(monkeypatch):
     assert len(out["open_questions"][0]["options"]) == 4
 
 
+def test_missing_or_out_of_range_default_falls_back_to_first_option(monkeypatch):
+    # The control must open on *something*, never an empty state.
+    monkeypatch.setattr(
+        llm,
+        "_json_call",
+        lambda *a, **kw: {
+            "open_questions": [
+                {"question": "No default", "options": [{"label": "a"}, {"label": "b"}]},
+                {"question": "Silly default", "options": [{"label": "a"}], "default": 9},
+            ]
+        },
+    )
+    out = llm.draft_proposal(topic="t", recon_results=[], settings=REAL)
+    assert out["open_questions"][0]["default"] == 0
+    assert out["open_questions"][1]["default"] == 0
+
+
+def test_free_text_question_keeps_a_null_default(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "_json_call",
+        lambda *a, **kw: {"open_questions": [{"question": "Geography", "options": [], "default": 2}]},
+    )
+    out = llm.draft_proposal(topic="t", recon_results=[], settings=REAL)
+    assert out["open_questions"][0]["default"] is None
+
+
 def test_open_question_with_no_text_is_dropped(monkeypatch):
     monkeypatch.setattr(
         llm,
         "_json_call",
-        lambda *a, **kw: {"open_questions": [{"question": "", "affects": "x"}, {"question": "real one"}]},
+        lambda *a, **kw: {"open_questions": [{"question": "", "options": []}, {"question": "real one"}]},
     )
     out = llm.draft_proposal(topic="t", recon_results=[], settings=REAL)
-    assert out["open_questions"] == [{"question": "real one", "affects": "", "options": []}]
+    assert out["open_questions"] == [{"question": "real one", "options": [], "default": None}]

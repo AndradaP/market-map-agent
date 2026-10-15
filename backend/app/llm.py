@@ -148,16 +148,27 @@ def draft_proposal(
             "Return JSON with keys: layers (list[str], 3-7), layer_definitions "
             "(object mapping each layer -> one sentence), in_scope (list[str]), "
             "excluded_adjacent (list[str]), zoom_level ('component'|'company'|'category'), "
-            "open_questions (list, <=3, each {\"question\": str, \"affects\": str, "
-            "\"options\": list[str]}), notes (str).\n"
-            "Each open_question must be answerable without outside research: `affects` "
-            "names what it concerns (usually one of the `layers`, or \"scope\"/\"zoom_level\" "
-            "if not layer-specific), and `options` gives 2-4 concrete choices the user can "
-            "pick from directly — never assume the user already knows the jargon behind the "
-            "question (e.g. don't just ask 'should Guardrails be its own layer?' with no "
-            "options; give the concrete choices: ['Keep as its own layer', 'Fold into "
-            "<layer>']). Use options: [] only when a question is genuinely open-ended and "
-            "can't be reduced to a short pick-list.\n\n"
+            "open_questions (list, <=3), notes (str).\n\n"
+            "open_questions render as SETTINGS ROWS in a form, not as prose. Each is\n"
+            '{"question": str, "options": [{"label": str, "in_scope": list[str], '
+            '"excluded": list[str]}], "default": int}.\n'
+            "- `question` is a SHORT label naming what's being decided, at most 4 words "
+            "and no sentence, no question mark: 'Large incumbents', 'Classical ML "
+            "monitoring', 'Guardrails layer'. The options carry the meaning.\n"
+            "- `options` gives 2-4 short choice labels (1-3 words each: 'include', "
+            "'exclude', 'own layer', 'fold in'). For each option, `in_scope` and "
+            "`excluded` are the scope entries that should be present WHEN THAT OPTION "
+            "IS SELECTED — the user sees their answer land in the In scope / Excluded "
+            "lists. Keep those entries short and use [] when an option contributes "
+            "nothing to a list.\n"
+            "- `default` is the index of the option your proposal already took, so the "
+            "control opens on your own choice. The in_scope/excluded you return at the "
+            "top level must agree with every question's default option.\n"
+            "- Use options: [] with default: null ONLY when the decision genuinely "
+            "can't be reduced to a pick-list (e.g. 'Geography'); it then renders as a "
+            "free-text row.\n"
+            "- Never ask about how many companies per layer or how granular the "
+            "entries are. Those are controls the user already has.\n\n"
             "Two scoping calls you must make explicitly, not by accident — state the "
             "decision in `notes`, and reflect it in `excluded_adjacent` when it's clear-cut "
             "for this topic, or as one of the `open_questions` when it's a genuine judgment "
@@ -180,23 +191,53 @@ def draft_proposal(
     return out
 
 
+def _strs(raw) -> List[str]:
+    return [str(x).strip() for x in (raw or []) if str(x).strip()]
+
+
+def _normalize_option(raw) -> dict:
+    """One settings-row choice. Accepts the legacy plain-string option shape
+    so an older cached proposal (or a model that ignores the schema) still
+    renders -- it just contributes no scope chips."""
+    if isinstance(raw, str):
+        return {"label": raw.strip(), "in_scope": [], "excluded": []}
+    if isinstance(raw, dict):
+        return {
+            "label": str(raw.get("label", "")).strip(),
+            "in_scope": _strs(raw.get("in_scope")),
+            "excluded": _strs(raw.get("excluded")),
+        }
+    return {"label": "", "in_scope": [], "excluded": []}
+
+
 def _normalize_open_questions(raw: list) -> list:
-    """Defensive against a model response that doesn't fully match the
-    structured shape -- e.g. a plain string instead of the object, or an
-    options list longer than makes sense as a pick-list. Never let a
-    malformed open_questions entry break the confirm screen."""
+    """Never let a malformed open_questions entry break the confirm screen.
+
+    Degrades rather than drops: a legacy plain string becomes a free-text
+    row, legacy string options become labelled options with no scope effect,
+    and a missing/out-of-range `default` falls back to the first option so
+    the control still opens on something rather than an empty state.
+    """
     out = []
     for q in raw[:3]:
         if isinstance(q, str):
-            out.append({"question": q, "affects": "", "options": []})
-        elif isinstance(q, dict):
-            out.append(
-                {
-                    "question": str(q.get("question", "")).strip(),
-                    "affects": str(q.get("affects", "")).strip(),
-                    "options": [str(o).strip() for o in (q.get("options") or [])][:4],
-                }
-            )
+            out.append({"question": q.strip(), "options": [], "default": None})
+            continue
+        if not isinstance(q, dict):
+            continue
+        options = [o for o in (_normalize_option(o) for o in (q.get("options") or [])) if o["label"]][:4]
+        default = q.get("default")
+        if not options:
+            default = None
+        elif not isinstance(default, int) or not 0 <= default < len(options):
+            default = 0
+        out.append(
+            {
+                "question": str(q.get("question", "")).strip(),
+                "options": options,
+                "default": default,
+            }
+        )
     return [q for q in out if q["question"]]
 
 
@@ -380,34 +421,6 @@ def company_one_liner(
     return out.get("one_liner", "").strip()
 
 
-@traceable(run_type="llm", name="claude.normalize_scope")
-def normalize_scope(scope: dict, *, settings: Optional[Settings] = None) -> dict:
-    """One cheap pass to tidy user-added layer names/order + fill missing definitions.
-    MUST NOT add/remove layers or change in_scope / excluded_adjacent / zoom_level."""
-    settings = settings or get_settings()
-    if settings.stubs_enabled:
-        return stubs.normalize_scope(scope)
-    out = _json_call(
-        settings,
-        model=settings.anthropic_model_mechanical,
-        system=(
-            "Tidy a value-chain scope the user edited by hand: make layer names parallel in "
-            "phrasing, put them in a sensible upstream->downstream order, and write a "
-            "one-sentence definition for any layer missing one. Do NOT add or remove layers, "
-            "and do NOT change in_scope, excluded_adjacent or zoom_level."
-        ),
-        user=(
-            f"Scope:\n{json.dumps(scope, indent=2)}\n\n"
-            "Return the same JSON shape (layers, layer_definitions, in_scope, "
-            "excluded_adjacent, zoom_level) with only naming/order/definitions adjusted."
-        ),
-    )
-    out.setdefault("in_scope", scope.get("in_scope", []))
-    out.setdefault("excluded_adjacent", scope.get("excluded_adjacent", []))
-    out.setdefault("zoom_level", scope.get("zoom_level", "company"))
-    return out
-
-
 @traceable(run_type="llm", name="claude.rescope_clarifying_question")
 def rescope_clarifying_question(
     notes: str, proposal: dict, *, settings: Optional[Settings] = None
@@ -439,17 +452,40 @@ def category_fit(
     definition: str,
     *,
     miscategorized_hint: bool = False,
+    in_scope: Optional[List[str]] = None,
+    excluded: Optional[List[str]] = None,
+    guidance: str = "",
     settings: Optional[Settings] = None,
 ) -> Tuple[bool, str]:
+    """Does this company belong in this layer, under the confirmed scope?
+
+    in_scope/excluded/guidance are what make the confirm screen's scope
+    controls real. Before this they were display-only: the user agreed a
+    boundary, and nothing downstream ever read it, so a company the user
+    had explicitly excluded could still land on the map.
+    """
     settings = settings or get_settings()
     if settings.stubs_enabled:
         return stubs.category_fit(one_liner_text, layer, definition, miscategorized=miscategorized_hint)
+    bounds = ""
+    if in_scope:
+        bounds += f"\nIn scope for this map: {', '.join(in_scope)}"
+    if excluded:
+        bounds += f"\nExplicitly EXCLUDED from this map: {', '.join(excluded)}"
+    if guidance:
+        bounds += f"\nExtra steer from the user: {guidance}"
     out = _json_call(
         settings,
         model=settings.anthropic_model_mechanical,
-        system="Decide whether a company belongs in a value-chain layer, given the layer's definition and a grounded one-liner.",
+        system=(
+            "Decide whether a company belongs in a value-chain layer, given the layer's "
+            "definition and a grounded one-liner. The map's scope boundaries are binding: "
+            "a company matching an excluded entry, or contradicting the user's steer, does "
+            "not fit even if it would otherwise suit the layer."
+        ),
         user=(
-            f"Layer: {layer}\nLayer definition: {definition}\nCompany one-liner: {one_liner_text}\n\n"
+            f"Layer: {layer}\nLayer definition: {definition}{bounds}\n"
+            f"Company one-liner: {one_liner_text}\n\n"
             'JSON: {"fits": bool, "reason": str}.'
         ),
     )

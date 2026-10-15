@@ -58,6 +58,31 @@ defensively handles a model response that doesn't fully comply (legacy
 plain strings, too many questions/options) rather than trusting it blindly.
 Cap stayed at 3, per the original recommendation.
 
+**Re-opened, then properly resolved.** That first fix honoured the *shape*
+of the recommendation and missed its *point*. The rule above was explicit:
+"a question the user can't act on without sending it back to the model is a
+rescope prompt in disguise." But picking an option only drafted a rescope
+note, so every answer still cost an attempt and a full model redraft — the
+exact thing the rule forbade. Worse, two of the three kinds of question the
+model actually asked couldn't be honoured at all: scope boundaries were
+display-only (never read by Execute or Verify) and per-layer breadth didn't
+exist as a concept (a global constant). The screen was asking for decisions
+the system had no way to act on.
+
+Now a question is a **setting**, not a question: `{question` (a short label
+like "Large incumbents"), `options: [{label, in_scope, excluded}], default}`.
+It renders as a labelled row preselected on the choice the proposal already
+made; switching options swaps that option's scope chips in and the previous
+one's out, so the answer lands somewhere the user can see. No model call, no
+attempt spent. Questions that genuinely can't be reduced to a pick-list
+become free-text rows feeding `guidance`, which reaches the search query and
+the category-fit check. Cap is still 3.
+
+**The lesson worth keeping:** the spec was right the first time and the
+implementation drifted from it while appearing to satisfy it. A structured
+type that routes into the wrong mechanism looks like compliance in a diff
+and isn't.
+
 ---
 
 ## 2. Exa returns nothing usable for a layer  *(from the brief)*

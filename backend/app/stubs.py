@@ -32,21 +32,33 @@ _DEMOS: Dict[str, dict] = {
             "excluded_adjacent": [
                 "generic APM (Datadog-style infra metrics)", "model training / MLOps pipelines",
                 "vector databases", "data labelling platforms",
+                # Contributed by the "Provider-native tooling" question's
+                # default option. The top-level lists have to agree with
+                # every question's default, same rule the prompt gives the
+                # real model, or the screen opens showing an answer whose
+                # chip isn't there.
+                "model-provider dashboards",
             ],
             "zoom_level": "company",
             "open_questions": [
                 {
-                    "question": "Should 'Guardrails' be its own layer rather than folded into "
-                    "Monitoring? It has a distinct vendor set.",
-                    "affects": "Monitoring, Alerting & Guardrails",
-                    "options": ["Keep as its own layer", "Fold into Monitoring, Alerting & Guardrails"],
+                    "question": "Guardrails",
+                    "options": [
+                        {"label": "own layer", "in_scope": ["runtime guardrails"], "excluded": []},
+                        {"label": "fold into monitoring", "in_scope": [], "excluded": []},
+                        {"label": "out of scope", "in_scope": [], "excluded": ["runtime guardrails"]},
+                    ],
+                    "default": 1,
                 },
                 {
-                    "question": "Is model-provider-native tooling (e.g. dashboards shipped by an "
-                    "LLM API) in scope, or only third-party tools?",
-                    "affects": "scope",
-                    "options": ["Include model-provider-native tooling", "Only third-party tools"],
+                    "question": "Provider-native tooling",
+                    "options": [
+                        {"label": "include", "in_scope": ["model-provider dashboards"], "excluded": []},
+                        {"label": "third-party only", "in_scope": [], "excluded": ["model-provider dashboards"]},
+                    ],
+                    "default": 1,
                 },
+                {"question": "Geography", "options": [], "default": None},
             ],
             "notes": "Recon was rich and consistent for this topic; the split below is well-supported.",
         },
@@ -179,19 +191,23 @@ def proposal(topic: str, attempt: int = 1, rescope_notes: str = "") -> dict:
             l: f"The '{l.lower()}' stage of the {topic} value chain." for l in _GENERIC_LAYERS
         },
         "in_scope": [topic, f"core {topic} providers"],
-        "excluded_adjacent": [f"general-purpose infrastructure not specific to {topic}"],
+        "excluded_adjacent": [
+            f"general-purpose infrastructure not specific to {topic}",
+            # Contributed by the "Services firms" question's default option;
+            # the lists must agree with every default (see the demo fixture).
+            "consultancies and integrators",
+        ],
         "zoom_level": "company",
         "open_questions": [
             {
-                "question": f"Is '{topic}' meant at the component level or the finished-product level?",
-                "affects": "zoom_level",
-                "options": ["Component level", "Finished-product / company level"],
+                "question": "Services firms",
+                "options": [
+                    {"label": "include", "in_scope": ["consultancies and integrators"], "excluded": []},
+                    {"label": "product vendors only", "in_scope": [], "excluded": ["consultancies and integrators"]},
+                ],
+                "default": 1,
             },
-            {
-                "question": "Which adjacent categories should be treated as out of scope?",
-                "affects": "scope",
-                "options": [],
-            },
+            {"question": "Adjacent categories", "options": [], "default": None},
         ],
         "notes": (
             "No hand-written fixture for this topic and stub mode is on, so this is a "
@@ -246,22 +262,6 @@ def rescope_clarifying_question(notes: str, proposal: dict) -> str:
         "Which specific layer or boundary is wrong, and what would you expect instead? "
         "For example: 'split X into A and B', or 'Y should be out of scope'."
     )
-
-
-def normalize_scope(scope: dict) -> dict:
-    """Deterministic tidy: trim names, keep order, ensure every layer has a definition.
-    Does NOT add/remove layers or touch scope/zoom."""
-    layers = [str(l).strip() for l in scope.get("layers", [])]
-    defs = dict(scope.get("layer_definitions", {}))
-    for l in layers:
-        defs.setdefault(l, f"The '{l.lower()}' stage of the value chain.")
-    return {
-        "layers": layers,
-        "layer_definitions": {l: defs[l] for l in layers},
-        "in_scope": scope.get("in_scope", []),
-        "excluded_adjacent": scope.get("excluded_adjacent", []),
-        "zoom_level": scope.get("zoom_level", "company"),
-    }
 
 
 def category_fit(one_liner_text: str, layer: str, definition: str, miscategorized: bool = False) -> tuple:

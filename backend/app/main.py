@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from .checkpointer import build_checkpointer
 from .config import get_settings
 from .graph import build_graph
-from .rate_limit import RateLimitExceeded, check_and_record, client_ip
+from .rate_limit import RateLimitExceeded, check_and_record, client_ip, usage
 from .tracing import configure_tracing
 
 _ctx: Dict[str, Any] = {}
@@ -63,7 +63,6 @@ class RespondBody(BaseModel):
     notes: str = ""
     different_topic: bool = False
     edited_scope: Optional[Dict[str, Any]] = None
-    normalize: bool = False  # direct_edit: tidy user-added layer names/order (not a rescope)
 
 
 def _interrupt_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -74,16 +73,28 @@ def _interrupt_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return getattr(first, "value", first)
 
 
-def _shape(result: Dict[str, Any], run_id: str) -> Dict[str, Any]:
+def _shape(
+    result: Dict[str, Any], run_id: str, maps: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     payload = _interrupt_payload(result)
+    base = {"run_id": run_id, "maps": maps}
     if payload is not None:
-        return {"run_id": run_id, "status": "awaiting_confirmation", "review": payload}
+        return {**base, "status": "awaiting_confirmation", "review": payload}
     return {
-        "run_id": run_id,
+        **base,
         "status": "complete",
         "final_output": result.get("final_output"),
         "metrics": result.get("metrics"),
     }
+
+
+def _maps_counter(request: Request, settings) -> Dict[str, Any]:
+    """What the header's 'map 2 of 3 today' counter reads from. The owner
+    bypass skips the limiter entirely, so it reports as unlimited rather
+    than counting toward a cap that will never fire for them."""
+    if _is_owner(request, settings):
+        return {"used": None, "limit": None, "owner": True}
+    return {**usage(client_ip(request), settings), "owner": False}
 
 
 @app.get("/healthz")
@@ -120,7 +131,7 @@ def create_run(body: CreateRun, request: Request) -> Dict[str, Any]:
     run_id = uuid4().hex
     cfg = {"configurable": {"thread_id": run_id}}
     result = _ctx["graph"].invoke({"topic": body.topic, "run_id": run_id}, cfg)
-    return _shape(result, run_id)
+    return _shape(result, run_id, _maps_counter(request, settings))
 
 
 def _is_fresh_map_request(body: RespondBody) -> bool:
@@ -149,7 +160,7 @@ def respond(run_id: str, body: RespondBody, request: Request) -> Dict[str, Any]:
                 f"Daily demo limit reached ({exc.scope}: {exc.limit}/day). Try again tomorrow.",
             )
     result = _ctx["graph"].invoke(Command(resume=body.model_dump()), cfg)
-    return _shape(result, run_id)
+    return _shape(result, run_id, _maps_counter(request, settings))
 
 
 @app.get("/runs/{run_id}")

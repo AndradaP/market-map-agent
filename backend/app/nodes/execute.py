@@ -29,9 +29,10 @@ def _research_layer(
     extra_by_tier: dict,
     hard_cap: int,
     settings: Settings,
+    guidance: str = "",
 ) -> Tuple[str, Dict[str, Any]]:
     found = search.find_company_sources(
-        layer=layer, topic=topic, definition=definition, settings=settings
+        layer=layer, topic=topic, definition=definition, guidance=guidance, settings=settings
     )
     raw = found["candidates"]
 
@@ -128,6 +129,10 @@ def execute_node(state: MarketMapState) -> dict:
     layers: List[str] = scope.get("layers", [])
     defs: Dict[str, str] = scope.get("layer_definitions", {})
     extra_by_tier: dict = state.get("credible_outlets", {}) or {}
+    # Set on the confirm screen. Was a global constant, so the model could
+    # ask "how wide should this layer go?" and the answer changed nothing.
+    hard_cap = scope.get("companies_per_layer") or settings.layer_company_hard_cap
+    guidance: str = scope.get("guidance", "")
 
     research: Dict[str, List[Company]] = {}
     layer_meta: Dict[str, Any] = {}
@@ -142,8 +147,9 @@ def execute_node(state: MarketMapState) -> dict:
                 layer,
                 defs.get(layer, ""),
                 extra_by_tier,
-                settings.layer_company_hard_cap,
+                hard_cap,
                 settings,
+                guidance,
             )
             for layer in layers
         ]
