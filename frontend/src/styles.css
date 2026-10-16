@@ -53,6 +53,11 @@ input.answered { border-color: #38bdf8; background: #38bdf814; }
   display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
   padding: 3px 8px; border: 1px solid #8886; border-radius: 6px;
 }
+/* The prompt asks for <=6 words per entry, but a real response came back
+   with a 15-word chip carrying a parenthetical vendor list. Truncate rather
+   than let one non-compliant entry turn the row into a paragraph; the full
+   text stays available on hover. */
+.chip span { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip i { font-style: normal; opacity: 0.5; cursor: pointer; }
 .chip i:hover { opacity: 1; }
 .chips input { width: 110px; font-size: 12px; padding: 4px 8px; }
@@ -68,7 +73,8 @@ input.answered { border-color: #38bdf8; background: #38bdf814; }
 .addlayer input { flex: 1; }
 
 .hint { font-size: 12px; opacity: 0.65; margin: 4px 0 10px; }
-.working { opacity: 0.7; }
+.working { border: 1px solid #8884; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.working p { margin: 0 0 4px; }
 .notes { background: #ffcc0022; padding: 8px 12px; border-radius: 6px; font-size: 14px; }
 .error { background: #ff000018; color: #b00; padding: 10px; border-radius: 6px; white-space: pre-wrap; }
 .widen { background: #8881; padding: 8px 12px; border-radius: 6px; margin: 8px 0; font-size: 13px; }

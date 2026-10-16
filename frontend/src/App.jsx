@@ -1,5 +1,26 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createRun, respond } from "./api.js";
+
+// A real propose takes ~70s and a full execute pass considerably longer. A
+// bare "Working…" for that long reads as a hang -- which it did, to the
+// first person who tried the deployed demo. These are elapsed-time cues,
+// deliberately not a fake progress bar: the backend doesn't stream phase
+// updates, so claiming to know the current step would be made up.
+const STAGES = [
+  [0, "Searching the web for how this space is structured…"],
+  [15, "Reading what came back…"],
+  [35, "Drafting a structure…"],
+  [70, "Still working. A first draft usually lands around now…"],
+  [110, "Taking longer than usual, but the run is still going."],
+];
+
+const RESEARCH_STAGES = [
+  [0, "Researching companies for each layer…"],
+  [30, "Corroborating each company against independent sources…"],
+  [90, "Verifying the companies that made the cut…"],
+  [180, "Assembling the map…"],
+  [300, "Still going. Bigger maps take a few minutes."],
+];
 
 const BREADTH_OPTIONS = [10, 25, 50];
 const DEFAULT_BREADTH = 25;
@@ -14,6 +35,7 @@ export default function App() {
   const [maps, setMaps] = useState(null); // {used, limit, owner}
   const [topic, setTopic] = useState("");
   const [dirty, setDirty] = useState(false); // has the user touched anything?
+  const [stage, setStage] = useState("propose"); // which wait the user is in
 
   function routePayload(res) {
     if (res.maps) setMaps(res.maps);
@@ -39,6 +61,7 @@ export default function App() {
 
   const start = (t) =>
     guard(async () => {
+      setStage("propose");
       setTopic(t);
       const res = await createRun(t);
       setRunId(res.run_id);
@@ -48,6 +71,8 @@ export default function App() {
 
   const send = (payload) =>
     guard(async () => {
+      // Continuing runs the whole research pass; a redraft just re-proposes.
+      setStage(payload.type === "direct_edit" || payload.type === "none" ? "research" : "propose");
       const res = await respond(runId, payload);
       setDirty(false);
       routePayload(res);
@@ -79,8 +104,8 @@ export default function App() {
         />
       )}
       {phase === "topic" && <h1>Market Map Agent</h1>}
-      {error && <pre className="error">{error}</pre>}
-      {phase === "loading" && <p className="working">Working…</p>}
+      {error && <div className="error">{friendlyError(error)}</div>}
+      {phase === "loading" && <Working stages={stage === "research" ? RESEARCH_STAGES : STAGES} />}
       {phase === "topic" && <TopicForm onSubmit={start} />}
       {phase === "review" && (
         <ProposalReview review={review} onSend={send} onDirty={() => setDirty(true)} />
@@ -89,6 +114,44 @@ export default function App() {
       {phase === "final" && <FinalMap final={final} />}
     </main>
   );
+}
+
+function Working({ stages }) {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSecs((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const [, label] = [...stages].reverse().find(([at]) => secs >= at) || stages[0];
+  return (
+    <div className="working">
+      <p>{label}</p>
+      <p className="meta">{secs}s elapsed · leaving this page loses the run</p>
+    </div>
+  );
+}
+
+// A thrown fetch error arrives as "429 {"detail":"..."}". Showing that raw
+// reads as a crash to anyone who isn't the person who wrote it.
+function friendlyError(raw) {
+  const s = String(raw);
+  const match = s.match(/\{.*\}/);
+  let detail = "";
+  if (match) {
+    try {
+      detail = JSON.parse(match[0]).detail || "";
+    } catch {
+      detail = "";
+    }
+  }
+  if (s.includes("429")) return detail || "You've hit today's limit. Try again tomorrow.";
+  if (s.includes("404")) {
+    return "That run is no longer available — the server restarted. Start a new map.";
+  }
+  if (s.includes("Load failed") || s.includes("NetworkError") || s.includes("Failed to fetch")) {
+    return "Couldn't reach the server. It may still be starting up — try again in a moment.";
+  }
+  return detail || "Something went wrong on the server. Try again.";
 }
 
 function mapsLabel(maps) {
@@ -208,7 +271,7 @@ function Chips({ items, onRemove, onAdd }) {
     <div className="chips">
       {items.map((x) => (
         <span className="chip" key={x}>
-          {x}
+          <span title={x}>{x}</span>
           <i onClick={() => onRemove(x)} title="remove">×</i>
         </span>
       ))}
