@@ -62,12 +62,21 @@ map that exists.
 One user, a web form, no login (v1).
 
 1. **Submit a topic.**
-2. **Review the proposed structure.** Three affordances:
-   - **Confirm as-is.**
-   - **Direct edit** — rename / drop / add layers, edit a layer's definition,
-     change the zoom level. No model call. Free and unlimited.
-   - **Rescope request** — free-text "what's wrong", optional "this is actually a
-     different topic" checkbox. Capped (§6). The model tries again.
+2. **Review the proposed structure** — one screen, organised by what a change
+   costs. Anything in the sticky header spends something; everything in the
+   body is free. That rule replaces explaining each control.
+   - **Body (free, no model call, unlimited):** parameters — zoom, companies
+     per layer, in/out-of-scope chips, free-text guidance — then layers
+     (rename / drop / add / edit definitions), then **Continue**.
+   - **The model's open questions are parameters too.** Each renders as a
+     labelled settings row whose options are preselected on the choice the
+     proposal already made; switching an option edits the scope chips
+     directly. A question that can't be reduced to a pick-list becomes a
+     free-text row. Answering never costs an attempt — which was the
+     original intent in OPEN_DECISIONS.md #1, lost in the first build.
+   - **Header (spends something):** **Redraft** (free-text "what's wrong",
+     capped per §6, model tries again) and **New map** (a different topic,
+     spends one of the day's maps; always confirms first).
 3. **Receive the final map** — per layer: an explanation and its verified
    companies; plus a review queue (verified but under-corroborated) and a
    rejected list, each with reasons.
@@ -78,9 +87,9 @@ One user, a web form, no login (v1).
 |---|------|----|----|
 | 1 | **Recon** | topic string | search results/snippets; the tier 1–3 outlets that are credible *for this topic* |
 | 2 | **Propose** | recon results (+ rescope notes) | proposal: `layers`, `layer_definitions`, `in_scope`, `excluded_adjacent`, `zoom_level` (`component`/`company`/`category`), `open_questions`, honest `notes` — and now two scoping calls stated explicitly rather than left to accident: are generalist consulting/services firms in scope, and are large incumbents included alongside emerging players (see BACKLOG.md, "manual review pass") |
-| 3 | **Confirm / edit** | the proposal | confirmed scope, **or** a routed edge back to Propose (or Recon, if "different topic"). A real pause — `interrupt()` suspends, `Command(resume=…)` continues. |
+| 3 | **Confirm / edit** | the proposal | confirmed scope (layers, definitions, in/out of scope, zoom, **companies-per-layer**, **free-text guidance**), **or** a routed edge back to Propose (or Recon, if "different topic"). A real pause — `interrupt()` suspends, `Command(resume=…)` continues. |
 | 4 | **Execute** | confirmed scope | raw candidates per layer — name, claimed URL, corroborating sources, independent-source-count corroboration verdict (see §6). Each candidate is first merged against the persistent company registry (cross-run accumulated evidence, keyed by domain) before scoring. Parallel across layers. |
-| 5 | **Verify** | raw candidates | per company: existence & identity check (URL resolves — a 403/429 on a company that already cleared corroboration downgrades to the review queue rather than hard-rejecting, since that's an ambiguous bot-block signal, not proof the company is fake; grounded one-liner from retrieved text) **and** category-fit check (one-liner vs the layer's confirmed definition). Failures kept with a reason. |
+| 5 | **Verify** | raw candidates | per company: existence & identity check (URL resolves — a 403/429 on a company that already cleared corroboration downgrades to the review queue rather than hard-rejecting, since that's an ambiguous bot-block signal, not proof the company is fake; grounded one-liner from retrieved text) **and** category-fit check (one-liner vs the layer's confirmed definition **plus the confirmed in/out-of-scope boundaries and guidance, which are binding** — see §5 "Confirm screen"). Failures kept with a reason. |
 | 6 | **Synthesize** | confirmed scope + verified layers | cross-layer dedup first (the same company independently found by more than one layer is merged by canonical host, kept once at its best status — not shown as a duplicate); final map (structured); write the run-log row |
 
 ## 6. Rules

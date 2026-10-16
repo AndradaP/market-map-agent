@@ -1,15 +1,22 @@
 import { useMemo, useState } from "react";
 import { createRun, respond } from "./api.js";
 
-// Screens: topic input -> proposal review/edit (or clarification) -> final nested list.
+const BREADTH_OPTIONS = [10, 25, 50];
+const DEFAULT_BREADTH = 25;
+
+// Screens: topic input -> review (one screen) -> final nested list.
 export default function App() {
   const [phase, setPhase] = useState("topic"); // topic | review | clarify | final | loading
   const [error, setError] = useState(null);
   const [runId, setRunId] = useState(null);
   const [review, setReview] = useState(null); // interrupt payload
   const [final, setFinal] = useState(null);
+  const [maps, setMaps] = useState(null); // {used, limit, owner}
+  const [topic, setTopic] = useState("");
+  const [dirty, setDirty] = useState(false); // has the user touched anything?
 
   function routePayload(res) {
+    if (res.maps) setMaps(res.maps);
     if (res.status === "awaiting_confirmation") {
       setReview(res.review);
       setPhase(res.review.kind === "rescope_clarification" ? "clarify" : "review");
@@ -30,41 +37,120 @@ export default function App() {
     }
   }
 
-  const start = (topic) =>
+  const start = (t) =>
     guard(async () => {
-      const res = await createRun(topic);
+      setTopic(t);
+      const res = await createRun(t);
       setRunId(res.run_id);
+      setDirty(false);
       routePayload(res);
     }, "topic");
 
   const send = (payload) =>
-    guard(async () => routePayload(await respond(runId, payload)), review ? "review" : "topic");
+    guard(async () => {
+      const res = await respond(runId, payload);
+      setDirty(false);
+      routePayload(res);
+    }, review ? "review" : "topic");
 
   const startOver = () => {
+    // Always confirms: a misclick here loses every edit on the screen and
+    // the next topic you submit spends one of the day's maps.
+    if (!window.confirm("Start a new map? Anything you've changed here is lost.")) return;
     setError(null);
     setRunId(null);
     setReview(null);
     setFinal(null);
+    setTopic("");
+    setDirty(false);
     setPhase("topic");
   };
 
   return (
     <main>
-      <div className="topbar">
-        <h1>Market Map Agent</h1>
-        {phase !== "topic" && (
-          <button type="button" className="startover" onClick={startOver}>
-            Start a new market map
-          </button>
-        )}
-      </div>
+      {phase !== "topic" && (
+        <Header
+          topic={topic}
+          maps={maps}
+          review={phase === "review" ? review : null}
+          onNewMap={startOver}
+          onRedraft={(notes) => send({ type: "rescope_request", notes, edited_scope: null })}
+          dirty={dirty}
+        />
+      )}
+      {phase === "topic" && <h1>Market Map Agent</h1>}
       {error && <pre className="error">{error}</pre>}
-      {phase === "loading" && <p>Working…</p>}
+      {phase === "loading" && <p className="working">Working…</p>}
       {phase === "topic" && <TopicForm onSubmit={start} />}
-      {phase === "review" && <ProposalReview review={review} onSend={send} />}
+      {phase === "review" && (
+        <ProposalReview review={review} onSend={send} onDirty={() => setDirty(true)} />
+      )}
       {phase === "clarify" && <ClarificationForm review={review} onSend={send} />}
       {phase === "final" && <FinalMap final={final} />}
     </main>
+  );
+}
+
+function mapsLabel(maps) {
+  if (!maps) return null;
+  if (maps.owner || maps.limit == null) return "unlimited";
+  return `map ${Math.min(maps.used, maps.limit)} of ${maps.limit} today`;
+}
+
+// Everything in the header spends something. Everything in the body is free.
+// That's the whole rule, so neither needs explaining on screen.
+function Header({ topic, maps, review, onNewMap, onRedraft, dirty }) {
+  const [open, setOpen] = useState(false);
+  const [notes, setNotes] = useState("");
+  const left = review ? review.rescopes_remaining : null;
+  const capped = review ? review.direct_edit_only : false;
+
+  return (
+    <>
+      <div className="topbar">
+        <div>
+          <div className="topic">{topic || "Market Map Agent"}</div>
+          {maps && <div className="meta">{mapsLabel(maps)}</div>}
+        </div>
+        <div className="topactions">
+          {review && !capped && (
+            <span className="meta">{left} redraft{left === 1 ? "" : "s"} left</span>
+          )}
+          {review && (
+            <button type="button" onClick={() => setOpen(!open)} disabled={capped || left === 0}>
+              Redraft
+            </button>
+          )}
+          <button type="button" onClick={onNewMap}>New map</button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="redraft">
+          <p className="meta">
+            Asks the model for a different structure. Spends one redraft
+            {dirty ? ", and replaces your edits on this screen." : "."}
+          </p>
+          <textarea
+            value={notes}
+            autoFocus
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="What's wrong with the structure, and what would you expect instead?"
+          />
+          <div className="topactions">
+            <button type="button" onClick={() => setOpen(false)}>Cancel</button>
+            <button
+              type="button"
+              disabled={!notes.trim()}
+              onClick={() => onRedraft(notes.trim())}
+            >
+              Send redraft
+            </button>
+          </div>
+        </div>
+      )}
+      {capped && review?.handoff_message && <p className="notes">{review.handoff_message}</p>}
+    </>
   );
 }
 
@@ -78,282 +164,275 @@ function TopicForm({ onSubmit }) {
       }}
     >
       <label>
-        Topic — broad or narrow
-        <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="e.g. neo-cloud, geothermal energy" />
+        Topic
+        <input
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          placeholder="e.g. neo-cloud, geothermal energy"
+        />
       </label>
       <button type="submit">Research &amp; propose a structure</button>
     </form>
   );
 }
 
-const EDIT_KEYWORDS = [
-  "scope", "exclude", "includ", "broad", "narrow", "split", "merge", "combine",
-  "separate", "layer", "stage", "component", "categor", "granular", "rename",
-  "reorder", "sub-cat", "subcateg", "out of scope",
-];
-const DIRECT_EDIT_VERBS = ["rename", "remove", "drop", "delete", "split", "merge", "reorder", "add"];
-
-function noteIsActionable(notes, layers, minChars) {
-  const n = (notes || "").trim();
-  if (n.length < minChars) return false;
-  const low = n.toLowerCase();
-  if (layers.some((l) => low.includes(String(l).toLowerCase()))) return true;
-  if (EDIT_KEYWORDS.some((k) => low.includes(k))) return true;
-  return n.length >= 40;
+function SegRow({ label, options, value, onPick }) {
+  return (
+    <div className="prow">
+      <span className="plabel">{label}</span>
+      <span className="seg">
+        {options.map((o, i) => (
+          <button
+            key={i}
+            type="button"
+            className={value === i ? "on" : ""}
+            onClick={() => onPick(i)}
+          >
+            {o}
+          </button>
+        ))}
+      </span>
+    </div>
+  );
 }
 
-function looksLikeDirectEdit(notes, layers) {
-  const low = (notes || "").toLowerCase();
-  const namesLayer = layers.some((l) => low.includes(String(l).toLowerCase()));
-  return namesLayer && DIRECT_EDIT_VERBS.some((v) => low.includes(v));
+function Chips({ items, onRemove, onAdd }) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const v = draft.trim();
+    if (!v || items.includes(v)) return;
+    onAdd(v);
+    setDraft("");
+  };
+  return (
+    <div className="chips">
+      {items.map((x) => (
+        <span className="chip" key={x}>
+          {x}
+          <i onClick={() => onRemove(x)} title="remove">×</i>
+        </span>
+      ))}
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), add())}
+        placeholder="add…"
+      />
+    </div>
+  );
 }
 
-function ProposalReview({ review, onSend }) {
+function ProposalReview({ review, onSend, onDirty }) {
   const p = review.proposal;
-  const minChars = review.min_note_chars ?? 15;
-  const totalAttempts = review.rescope_cap + 1;
+  const questions = p.open_questions || [];
 
   const [layers, setLayers] = useState(p.layers);
   const [defs, setDefs] = useState({ ...p.layer_definitions });
   const [zoom, setZoom] = useState(p.zoom_level);
+  const [breadth, setBreadth] = useState(DEFAULT_BREADTH);
+  const [inScope, setInScope] = useState(p.in_scope || []);
+  const [excluded, setExcluded] = useState(p.excluded_adjacent || []);
   const [newLayer, setNewLayer] = useState("");
-  const [dropped, setDropped] = useState([]); // {name, definition} awaiting a "widen sibling" decision
-  const [normalize, setNormalize] = useState(false);
+  const [dropped, setDropped] = useState([]);
+  const [guidance, setGuidance] = useState("");
+  // Each pick-list question opens on the option the model already took, so
+  // there's no empty state to interpret and no "unanswered" to explain.
+  const [answers, setAnswers] = useState(() =>
+    Object.fromEntries(questions.map((q, i) => [i, q.default])),
+  );
+  const [freeAnswers, setFreeAnswers] = useState({});
 
-  // Picked answers and free-typed notes are kept separate on purpose: an
-  // earlier version wrote picks straight into the same textarea a user could
-  // also type in, so picking an answer silently overwrote anything they'd
-  // typed (and vice versa). Keeping them apart and joining only at submit
-  // time means neither can clobber the other.
-  const [answers, setAnswers] = useState({}); // question index -> chosen option
-  const [customNotes, setCustomNotes] = useState("");
-  const [differentTopic, setDifferentTopic] = useState(false);
-
-  const pickAnswer = (i, option) => {
-    setAnswers((prev) => {
-      const next = { ...prev };
-      if (next[i] === option) delete next[i]; // click again to un-pick
-      else next[i] = option;
-      return next;
-    });
+  const touch = (fn) => (...args) => {
+    onDirty();
+    fn(...args);
   };
 
-  const pickedLines = Object.entries(answers).map(
-    ([idx, opt]) => `${p.open_questions[idx].question} -> ${opt}`
-  );
-  const rescopeNotes = [...pickedLines, customNotes.trim()].filter(Boolean).join(" ");
+  const swap = (list, remove, add) => {
+    const kept = list.filter((x) => !remove.includes(x));
+    return [...kept, ...add.filter((x) => !kept.includes(x))];
+  };
 
-  const capText = review.direct_edit_only
-    ? review.handoff_message
-    : `Attempt ${review.attempt} of ${totalAttempts} for this run. Edits above are free ` +
-      `and unlimited; requesting a rescope below spends one of the ${review.rescope_cap} left.`;
+  // Each question owns its chips: switching options swaps the old option's
+  // entries out and the new option's in, so the answer is visible in the
+  // lists instead of recorded somewhere the user can't see.
+  const pick = touch((qi, oi) => {
+    const q = questions[qi];
+    const prev = q.options[answers[qi]] || { in_scope: [], excluded: [] };
+    const next = q.options[oi] || { in_scope: [], excluded: [] };
+    setAnswers({ ...answers, [qi]: oi });
+    setInScope((s) => swap(s, prev.in_scope || [], next.in_scope || []));
+    setExcluded((s) => swap(s, prev.excluded || [], next.excluded || []));
+  });
 
-  const editLayer = (i, v) => setLayers(layers.map((l, j) => (j === i ? v : l)));
-  const editDef = (name, v) => setDefs({ ...defs, [name]: v });
+  const editLayer = touch((i, v) => setLayers(layers.map((l, j) => (j === i ? v : l))));
+  const editDef = touch((name, v) => setDefs({ ...defs, [name]: v }));
 
-  const dropLayer = (i) => {
+  const dropLayer = touch((i) => {
     const name = layers[i];
     setLayers(layers.filter((_, j) => j !== i));
     if (defs[name]) setDropped([...dropped, { name, definition: defs[name] }]);
-  };
+  });
 
-  const addLayer = () => {
+  const addLayer = touch(() => {
     const name = newLayer.trim();
     if (!name || layers.includes(name)) return;
     setLayers([...layers, name]);
     setDefs({ ...defs, [name]: "" });
     setNewLayer("");
-  };
+  });
 
-  const widenInto = (droppedName, targetLayer) => {
+  const widenInto = touch((droppedName, targetLayer) => {
     const d = dropped.find((x) => x.name === droppedName);
     if (d && targetLayer) {
       setDefs({ ...defs, [targetLayer]: `${defs[targetLayer]} Also covers: ${d.definition}` });
     }
     setDropped(dropped.filter((x) => x.name !== droppedName));
-  };
-
-  const editedScope = () => ({
-    layers,
-    layer_definitions: Object.fromEntries(layers.map((l) => [l, defs[l] ?? ""])),
-    in_scope: p.in_scope,
-    excluded_adjacent: p.excluded_adjacent,
-    zoom_level: zoom,
   });
 
-  // Always sends the CURRENT field values, whether or not anything was
-  // touched -- there used to be a separate "Confirm as-is" button that sent
-  // edited_scope: null instead, which meant it silently discarded any inline
-  // edit you'd made with no warning. One button, always the live values:
-  // if nothing was touched, the live values already equal the proposal, so
-  // behavior is unchanged for that case and safe for the other.
-  const continueWithCurrentFields = () =>
-    onSend({ type: "direct_edit", notes: "", different_topic: false, edited_scope: editedScope(), normalize });
+  // Free-text answers and the catch-all steer both land in one guidance
+  // string, which reaches the search query and the category-fit check.
+  const fullGuidance = () =>
+    [
+      ...questions
+        .map((q, i) => (!q.options.length && freeAnswers[i]?.trim() ? `${q.question}: ${freeAnswers[i].trim()}` : ""))
+        .filter(Boolean),
+      guidance.trim(),
+    ]
+      .filter(Boolean)
+      .join(". ");
 
-  const actionable = noteIsActionable(rescopeNotes, layers, minChars);
-  const suggestDirect = looksLikeDirectEdit(rescopeNotes, layers);
-  const notePreview =
-    customNotes.trim().length > 70 ? `${customNotes.trim().slice(0, 70)}…` : customNotes.trim();
+  const submit = () =>
+    onSend({
+      type: "direct_edit",
+      notes: "",
+      different_topic: false,
+      edited_scope: {
+        layers,
+        layer_definitions: Object.fromEntries(layers.map((l) => [l, defs[l] ?? ""])),
+        in_scope: inScope,
+        excluded_adjacent: excluded,
+        zoom_level: zoom,
+        companies_per_layer: breadth,
+        guidance: fullGuidance(),
+      },
+    });
+
+  const pickQuestions = questions.filter((q) => q.options.length);
+  const freeQuestions = questions.map((q, i) => ({ q, i })).filter((x) => !x.q.options.length);
 
   return (
     <section>
-      <p className="cap">{capText}</p>
-      {p.notes && <p className="notes">Note from the model: {p.notes}</p>}
+      <div className="card">
+        <h2>Parameters</h2>
+        <SegRow
+          label="Zoom level"
+          options={["component", "company", "category"]}
+          value={["component", "company", "category"].indexOf(zoom)}
+          onPick={touch((i) => setZoom(["component", "company", "category"][i]))}
+        />
+        <p className="hint">
+          component = sub-parts, company = named companies, category = broader groupings.
+        </p>
+        <SegRow
+          label="Companies per layer"
+          options={BREADTH_OPTIONS.map((n) => `~${n}`)}
+          value={BREADTH_OPTIONS.indexOf(breadth)}
+          onPick={touch((i) => setBreadth(BREADTH_OPTIONS[i]))}
+        />
 
-      <h2>Structure</h2>
-      <ol>
+        {pickQuestions.map((q) => {
+          const qi = questions.indexOf(q);
+          return (
+            <SegRow
+              key={qi}
+              label={q.question}
+              options={q.options.map((o) => o.label)}
+              value={answers[qi]}
+              onPick={(oi) => pick(qi, oi)}
+            />
+          );
+        })}
+
+        <div className="divider">
+          <div className="plabel small">In scope</div>
+          <Chips
+            items={inScope}
+            onAdd={touch((v) => setInScope([...inScope, v]))}
+            onRemove={touch((v) => setInScope(inScope.filter((x) => x !== v)))}
+          />
+          <div className="plabel small">Excluded</div>
+          <Chips
+            items={excluded}
+            onAdd={touch((v) => setExcluded([...excluded, v]))}
+            onRemove={touch((v) => setExcluded(excluded.filter((x) => x !== v)))}
+          />
+        </div>
+
+        {freeQuestions.map(({ q, i }) => (
+          <div className="prow divider" key={i}>
+            <span className="plabel">{q.question}</span>
+            <input
+              className={freeAnswers[i]?.trim() ? "answered" : ""}
+              value={freeAnswers[i] || ""}
+              onChange={touch((e) => setFreeAnswers({ ...freeAnswers, [i]: e.target.value }))}
+            />
+          </div>
+        ))}
+
+        <div className="divider">
+          <div className="plabel">Anything else to steer this</div>
+          <input
+            className={guidance.trim() ? "answered" : ""}
+            value={guidance}
+            onChange={touch((e) => setGuidance(e.target.value))}
+            placeholder="Series A and later only"
+          />
+          <p className="hint">Shapes the search and what counts as a fit. Free.</p>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>Layers</h2>
         {layers.map((l, i) => (
-          <li key={i}>
+          <div className="layerblock" key={i}>
             <div className="layerrow">
               <input value={l} onChange={(e) => editLayer(i, e.target.value)} />
               <button type="button" onClick={() => dropLayer(i)}>drop</button>
             </div>
-            <textarea
+            <input
               className="defedit"
               value={defs[l] ?? ""}
               placeholder="One-line definition (used for the category-fit check)"
               onChange={(e) => editDef(l, e.target.value)}
             />
-          </li>
+          </div>
         ))}
-      </ol>
 
-      <div className="addlayer">
-        <input
-          value={newLayer}
-          onChange={(e) => setNewLayer(e.target.value)}
-          placeholder="Add a layer the model missed…"
-        />
-        <button type="button" onClick={addLayer} disabled={!newLayer.trim()}>add layer</button>
-      </div>
-
-      {dropped.map((d) => (
-        <div key={d.name} className="widen">
-          Dropped <strong>{d.name}</strong>. Fold its definition into another layer so its
-          companies still get researched?
-          <select
-            defaultValue=""
-            onChange={(e) => e.target.value && widenInto(d.name, e.target.value)}
-          >
-            <option value="">— keep dropped —</option>
-            {layers.map((l) => (
-              <option key={l} value={l}>widen “{l}”</option>
-            ))}
-          </select>
-        </div>
-      ))}
-
-      <label>
-        Zoom level
-        <select value={zoom} onChange={(e) => setZoom(e.target.value)}>
-          <option value="component">component</option>
-          <option value="company">company</option>
-          <option value="category">category</option>
-        </select>
-      </label>
-      <p className="hint">
-        How granular the map's entries are: <strong>component</strong> = sub-parts (e.g. "battery
-        cells"), <strong>company</strong> = named companies (the usual case), <strong>category</strong> = broader
-        groupings instead of naming individual players.
-      </p>
-
-      <div className="cols">
-        <div>
-          <h3>In scope</h3>
-          <ul>{p.in_scope.map((x, i) => <li key={i}>{x}</li>)}</ul>
-        </div>
-        <div>
-          <h3>Excluded (adjacent)</h3>
-          <ul>{p.excluded_adjacent.map((x, i) => <li key={i}>{x}</li>)}</ul>
-        </div>
-      </div>
-
-      <div className="actions">
-        <button onClick={continueWithCurrentFields}>Continue with this structure</button>
-        <label className="check">
-          <input type="checkbox" checked={normalize} onChange={(e) => setNormalize(e.target.checked)} />
-          Also tidy layer names &amp; order first (one cheap model pass, not a rescope)
-        </label>
-      </div>
-
-      {!review.direct_edit_only && (
-        <div className="rescope">
-          <h3>Something more fundamental to change?</h3>
-          <p className="hint">
-            Pick an answer below and/or write your own note — either way, nothing is sent until
-            you click "Request rescope" at the bottom. Editing layers above and clicking
-            "Continue" is free and separate from this; this section asks the model to try again.
-          </p>
-
-          {p.open_questions?.length > 0 && (
-            <ul className="openq">
-              {p.open_questions.map((q, i) => (
-                <li key={i}>
-                  {q.affects && <span className="badge">{q.affects}</span>} {q.question}
-                  {q.options?.length > 0 && (
-                    <div className="openq-options">
-                      {q.options.map((opt) => (
-                        <button
-                          key={opt}
-                          type="button"
-                          className={answers[i] === opt ? "picked" : ""}
-                          onClick={() => pickAnswer(i, opt)}
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </li>
+        {dropped.map((d) => (
+          <div key={d.name} className="widen">
+            Dropped <strong>{d.name}</strong>. Fold its definition into another layer so its
+            companies still get researched?
+            <select defaultValue="" onChange={(e) => e.target.value && widenInto(d.name, e.target.value)}>
+              <option value="">keep dropped</option>
+              {layers.map((l) => (
+                <option key={l} value={l}>widen “{l}”</option>
               ))}
-            </ul>
-          )}
+            </select>
+          </div>
+        ))}
 
-          {pickedLines.length > 0 && (
-            <p className="hint">Picked so far: {pickedLines.join(" · ")}</p>
-          )}
-
-          <textarea
-            value={customNotes}
-            onChange={(e) => setCustomNotes(e.target.value)}
-            placeholder="Add your own reasoning, or say what's wrong AND what you'd expect — e.g. 'batteries and charging are lumped together; charging infra should be its own stage'."
+        <div className="addlayer divider">
+          <input
+            value={newLayer}
+            onChange={(e) => setNewLayer(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addLayer())}
+            placeholder="Add a layer the model missed"
           />
-          {suggestDirect && (
-            <p className="hint">
-              “{notePreview}” sounds like something you can do yourself above (rename / drop /
-              add a layer) — that's free and doesn't spend an attempt.
-            </p>
-          )}
-          {!actionable && rescopeNotes.trim().length > 0 && (
-            <p className="hint">
-              Add a bit more — name the layer or boundary that's wrong and what you'd expect. If
-              it's still thin, the model will ask you one question before spending an attempt.
-            </p>
-          )}
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={differentTopic}
-              onChange={(e) => setDifferentTopic(e.target.checked)}
-            />
-            This is actually a different topic — starts over from scratch (uses one of today's
-            fresh-map attempts, not a rescope attempt)
-          </label>
-          <button
-            disabled={!rescopeNotes.trim()}
-            onClick={() =>
-              onSend({
-                type: "rescope_request",
-                notes: rescopeNotes.trim(),
-                different_topic: differentTopic,
-                edited_scope: null,
-              })
-            }
-          >
-            Request rescope
-          </button>
+          <button type="button" onClick={addLayer} disabled={!newLayer.trim()}>add</button>
         </div>
-      )}
+      </div>
+
+      <button className="primary" onClick={submit}>Continue</button>
     </section>
   );
 }
@@ -362,18 +441,19 @@ function ClarificationForm({ review, onSend }) {
   const [answer, setAnswer] = useState("");
   return (
     <section>
-      <p className="cap">
-        This won't spend a rescope attempt — just help the model aim.
-      </p>
-      <p className="notes">Your note: “{review.original_notes || "(blank)"}”</p>
-      <h3>{review.question}</h3>
-      <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Your answer…" />
-      <button
-        disabled={!answer.trim()}
-        onClick={() => onSend({ type: "rescope_clarification", notes: answer.trim() })}
-      >
-        Send &amp; rescope
-      </button>
+      <div className="card">
+        <p className="meta">This won't spend a redraft. It just helps the model aim.</p>
+        <p className="notes">Your note: “{review.original_notes || "(blank)"}”</p>
+        <h2>{review.question}</h2>
+        <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Your answer…" />
+        <button
+          className="primary"
+          disabled={!answer.trim()}
+          onClick={() => onSend({ type: "rescope_clarification", notes: answer.trim() })}
+        >
+          Send
+        </button>
+      </div>
     </section>
   );
 }
@@ -395,8 +475,8 @@ function FinalMap({ final }) {
   const nav = useMemo(() => final.layers.map((l) => l.name), [final]);
   return (
     <section>
-      <h2>{final.topic}</h2>
-      <p className="cap">zoom level: {final.zoom_level} · layers: {nav.length}</p>
+      {/* The topic already sits in the sticky header, so it isn't repeated here. */}
+      <p className="meta">zoom level: {final.zoom_level} · layers: {nav.length}</p>
 
       {final.warnings?.length > 0 && (
         <div className="warnings">

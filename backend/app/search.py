@@ -111,7 +111,12 @@ def corroborate_company(
 
 @traceable(run_type="retriever", name="exa.find_company_sources")
 def find_company_sources(
-    *, layer: str, topic: str, definition: str, settings: Optional[Settings] = None
+    *,
+    layer: str,
+    topic: str,
+    definition: str,
+    guidance: str = "",
+    settings: Optional[Settings] = None,
 ) -> dict:
     """Return ``{candidates: [...], reformulated: bool}``.
 
@@ -133,6 +138,8 @@ def find_company_sources(
         return {"candidates": cands, "reformulated": True}
 
     q = f'"{topic}" "{layer}" companies vendors players'
+    if guidance:
+        q = f"{q} {guidance}"
     hits = web_search(q, num_results=15, settings=settings)
     reformulated = False
     if not hits:

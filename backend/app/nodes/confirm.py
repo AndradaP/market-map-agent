@@ -110,9 +110,7 @@ def confirm_node(state: MarketMapState) -> dict:
 
     # --- confirm as-is ("none") or direct_edit: lock the scope and move on ---
     if etype == "direct_edit" and reply.get("edited_scope"):
-        scope = reply["edited_scope"]
-        if reply.get("normalize"):
-            scope = llm.normalize_scope(scope)
+        scope = dict(reply["edited_scope"])
     else:
         scope = {
             "layers": proposal.get("layers", []),
@@ -121,5 +119,10 @@ def confirm_node(state: MarketMapState) -> dict:
             "excluded_adjacent": proposal.get("excluded_adjacent", []),
             "zoom_level": proposal.get("zoom_level", "company"),
         }
+    # Breadth and guidance are set on the confirm screen, so a scope that
+    # skipped them (confirm-as-is, or an older client) falls back to the
+    # configured default rather than reaching Execute as None.
+    scope.setdefault("companies_per_layer", settings.layer_company_hard_cap)
+    scope.setdefault("guidance", "")
 
     return {"user_edit": reply, "confirmed_scope": scope}

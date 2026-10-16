@@ -11,19 +11,42 @@ ZoomLevel = Literal["component", "company", "category"]
 EditType = Literal["none", "direct_edit", "rescope_request"]
 
 
+class QuestionOption(TypedDict, total=False):
+    # Short choice label, e.g. "include" / "exclude".
+    label: str
+    # The scope chips this option contributes when it's the selected one.
+    # Each question owns its chips: switching options swaps this option's
+    # chips in and the previously selected option's chips out, so the
+    # answer is visible in the In scope / Excluded lists rather than
+    # recorded somewhere the user can't see.
+    in_scope: List[str]
+    excluded: List[str]
+
+
 class OpenQuestion(TypedDict, total=False):
+    """A scoping call the model wants a human on, shaped as a SETTING rather
+    than a question.
+
+    The original design (OPEN_DECISIONS.md #1) required every question be
+    answerable in the direct-edit UI without spending a rescope. The first
+    implementation drifted: answers drafted a rescope note instead, so the
+    only way to answer was to spend an attempt and have the model redraft.
+    Worse, two of the three kinds of question it asked (scope boundaries,
+    per-layer breadth) reached nothing downstream at all.
+
+    Now `question` is a short label ("Large incumbents"), `options` are the
+    settings it can take, and picking one edits the scope directly. Free,
+    instant, no model call.
+    """
+
+    # SHORT label, not a sentence -- it renders as a settings row.
     question: str
-    # Short label naming what this concerns -- usually a layer name from
-    # `layers`, or "scope"/"zoom_level" when it's not about one specific
-    # layer. Purely informational context for the UI, not a dispatch key.
-    affects: str
-    # 2-4 concrete choices the user can pick without outside research, or
-    # [] when the question is genuinely open-ended. Resolves the open design
-    # question (see OPEN_DECISIONS.md): a live UX test found a plain-string
-    # question referencing domain jargon ("should Guardrails be its own
-    # layer?") is unanswerable without looking the term up -- a concrete
-    # pick-one choice tied to a real, visible layer isn't.
-    options: List[str]
+    # 2-4 options, or [] when the question is genuinely open-ended and the
+    # answer is free text appended to `guidance`.
+    options: List[QuestionOption]
+    # Index of the option the proposal already took, so the control opens
+    # on the model's own choice instead of an empty state.
+    default: Optional[int]
 
 
 class Proposal(TypedDict, total=False):
@@ -47,6 +70,14 @@ class ConfirmedScope(TypedDict, total=False):
     in_scope: List[str]
     excluded_adjacent: List[str]
     zoom_level: ZoomLevel
+    # How many companies to aim for per layer. Was a global constant
+    # (`layer_company_hard_cap`), which meant the model could ask "how wide
+    # should this layer go?" and the answer changed nothing.
+    companies_per_layer: int
+    # Free-text steer for anything the controls don't capture ("European
+    # players only", "Series A and later"). Reaches the per-layer search
+    # query and the category-fit check, so it actually bites.
+    guidance: str
 
 
 class UserEdit(TypedDict, total=False):
@@ -54,7 +85,6 @@ class UserEdit(TypedDict, total=False):
     notes: str
     different_topic: bool  # only true if the user ticks the box; triggers fresh recon
     edited_scope: Optional[ConfirmedScope]  # payload of a direct_edit
-    normalize: bool  # direct_edit: run one cheap LLM pass to tidy names/order (not a rescope)
 
 
 class Corroboration(TypedDict, total=False):
