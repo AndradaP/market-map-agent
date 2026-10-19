@@ -35,7 +35,11 @@ async def lifespan(app: FastAPI):
     _ctx["meta"] = {
         "stubs_enabled": settings.stubs_enabled,
         "tracing_on": tracing_on,
-        "checkpointer": settings.checkpointer_backend,
+        # What's actually in use, not what was configured. Those differ when
+        # Postgres was set but unreachable, and a silent downgrade to
+        # in-memory is exactly the kind of thing that's baffling weeks later.
+        "checkpointer": "memory" if cp.degraded else settings.checkpointer_backend,
+        "checkpointer_degraded": cp.degraded or None,
         "rescope_cap": settings.rescope_cap,
     }
     try:
