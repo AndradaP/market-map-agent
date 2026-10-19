@@ -146,12 +146,20 @@ function friendlyError(raw) {
   }
   if (s.includes("429")) return detail || "You've hit today's limit. Try again tomorrow.";
   if (s.includes("404")) {
-    return "That run is no longer available — the server restarted. Start a new map.";
+    return "This run no longer exists. The backend restarted while it was paused, which clears runs in progress. Your topic is fine — start a new map.";
   }
+  // Names the backend specifically: the first person to hit this asked
+  // which server it meant, and guessed a third-party one.
   if (s.includes("Load failed") || s.includes("NetworkError") || s.includes("Failed to fetch")) {
-    return "Couldn't reach the server. It may still be starting up — try again in a moment.";
+    return (
+      "Couldn't reach the Market Map backend (this app's own API, not Anthropic or Exa). " +
+      "It restarts on deploy and drops requests in flight. Nothing was charged. Try again in a moment."
+    );
   }
-  return detail || "Something went wrong on the server. Try again.";
+  if (s.includes("500") || s.includes("502") || s.includes("503") || s.includes("504")) {
+    return detail || "The Market Map backend errored on this request. Try again; if it repeats, the run may be too large.";
+  }
+  return detail || "Something went wrong. Try again.";
 }
 
 function mapsLabel(maps) {
@@ -521,58 +529,133 @@ function ClarificationForm({ review, onSend }) {
   );
 }
 
-function CompanyItem({ c }) {
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function CompanyCard({ c }) {
+  const n = (c.corroboration?.independent_hosts || c.sources || []).length;
   const tiers = c.corroboration?.tiers || [];
   return (
-    <li>
-      <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> — {c.one_liner}
-      <div className="src">
-        {tiers.length > 0 && <span className="tiers">[{tiers.join(" · ")}]</span>} sources:{" "}
-        {(c.sources || []).join(", ")}
+    <article className="ccard">
+      <a className="cname" href={c.url} target="_blank" rel="noreferrer" title={c.url}>
+        {c.name}
+      </a>
+      <div className="cdomain">{hostOf(c.url)}</div>
+      <p className="cliner">{c.one_liner}</p>
+      <div className="cfoot" title={(c.sources || []).join("\n")}>
+        <span className="dots" aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <b key={i} className={i < Math.min(n, 3) ? "on" : ""} />
+          ))}
+        </span>
+        {n} source{n === 1 ? "" : "s"}
+        {tiers.length > 0 && <span className="tiers">{tiers.join(" · ")}</span>}
       </div>
-    </li>
+    </article>
+  );
+}
+
+// Secondary lists are collapsed so the map itself leads. Nothing is hidden
+// in the sense the PRD cares about -- the counts stay visible on the
+// summary line, it's one click to see every rejection and its reason.
+function Collapsible({ title, hint, count, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="collapsible">
+      <button type="button" className="clphead" onClick={() => setOpen(!open)}>
+        <span>{open ? "▾" : "▸"}</span> {title} <span className="count">{count}</span>
+      </button>
+      {open && (
+        <div className="clpbody">
+          {hint && <p className="hint">{hint}</p>}
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The explanation is a full paragraph and there's one per layer, so left
+// unclamped it buries the companies -- which are the point of the map.
+// Two lines by default, click to read the rest.
+function LayerExplanation({ text }) {
+  const [open, setOpen] = useState(false);
+  if (!text) return null;
+  return (
+    <p
+      className={`bandexp${open ? "" : " clamp"}`}
+      onClick={() => setOpen(!open)}
+      title={open ? "" : "Click to expand"}
+    >
+      {text}
+    </p>
   );
 }
 
 function FinalMap({ final }) {
-  const nav = useMemo(() => final.layers.map((l) => l.name), [final]);
+  const total = useMemo(
+    () => final.layers.reduce((n, l) => n + l.companies.length, 0),
+    [final],
+  );
   return (
-    <section>
+    <section className="map">
       {/* The topic already sits in the sticky header, so it isn't repeated here. */}
-      <p className="meta">zoom level: {final.zoom_level} · layers: {nav.length}</p>
+      <p className="meta">
+        {final.layers.length} layers · {total} companies · zoom: {final.zoom_level}
+      </p>
 
       {final.warnings?.length > 0 && (
         <div className="warnings">
-          <h3>Warnings</h3>
           <ul>{final.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
         </div>
       )}
 
+      {/* One band per layer, numbered, reading upstream to downstream. Bands
+          rather than side-by-side columns: a layer can hold 25+ companies and
+          another can hold 3, which columns render as one endless ribbon beside
+          a stub, and six columns are unreadable on anything but a monitor. */}
       {final.layers.map((layer, i) => (
-        <div key={i} className="layer">
-          <h3>
-            {layer.name} <span className={`status ${layer.status}`}>{layer.status}</span>
-            {layer.reformulated && <span className="badge">broadened query</span>}
-            {layer.over_cap && <span className="badge warn">too broad — capped</span>}
-          </h3>
-          <p>{layer.explanation}</p>
-          <ul>{layer.companies.map((c, j) => <CompanyItem key={j} c={c} />)}</ul>
+        <div key={i} className="band">
+          <div className="bandhead">
+            <h3>
+              <span className="num">{i + 1}</span> {layer.name}
+            </h3>
+            <div className="bandmeta">
+              {layer.companies.length > 0 && <span>{layer.companies.length}</span>}
+              {layer.status !== "ok" && (
+                <span className={`status ${layer.status}`}>{layer.status.replace(/_/g, " ")}</span>
+              )}
+              {layer.reformulated && <span className="badge">broadened</span>}
+              {layer.over_cap && <span className="badge warn">capped</span>}
+            </div>
+          </div>
+          <LayerExplanation text={layer.explanation} />
+          {layer.companies.length > 0 ? (
+            <div className="grid">
+              {layer.companies.map((c, j) => <CompanyCard key={j} c={c} />)}
+            </div>
+          ) : (
+            <p className="hint">No verified companies for this layer.</p>
+          )}
           {layer.under_corroborated_count > 0 && (
             <p className="hint">
-              {layer.under_corroborated_count} under-corroborated candidate
-              {layer.under_corroborated_count > 1 ? "s" : ""} in the review queue below.
+              {layer.under_corroborated_count} more in the review queue below.
             </p>
           )}
         </div>
       ))}
 
       {final.needs_review?.length > 0 && (
-        <div className="review-queue">
-          <h3>Review queue — verified, but under-corroborated</h3>
-          <p className="hint">
-            These resolve to a real company in the right layer, but fall short of the
-            independent-source bar. Promote or drop them by hand.
-          </p>
+        <Collapsible
+          title="Review queue"
+          count={final.needs_review.length}
+          hint="Real companies in the right layer that fall short of the independent-source bar. Promote or drop by hand."
+        >
           <ul>
             {final.needs_review.map((c, i) => (
               <li key={i}>
@@ -581,12 +664,15 @@ function FinalMap({ final }) {
               </li>
             ))}
           </ul>
-        </div>
+        </Collapsible>
       )}
 
       {final.rejected?.length > 0 && (
-        <div className="rejected">
-          <h3>Rejected — shown, not silently dropped</h3>
+        <Collapsible
+          title="Rejected"
+          count={final.rejected.length}
+          hint="Shown with reasons rather than silently dropped."
+        >
           <ul>
             {final.rejected.map((c, i) => (
               <li key={i}>
@@ -594,7 +680,7 @@ function FinalMap({ final }) {
               </li>
             ))}
           </ul>
-        </div>
+        </Collapsible>
       )}
     </section>
   );
