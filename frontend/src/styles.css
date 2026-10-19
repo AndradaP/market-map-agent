@@ -80,7 +80,40 @@ input.answered { border-color: #38bdf8; background: #38bdf814; }
 .widen { background: #8881; padding: 8px 12px; border-radius: 6px; margin: 8px 0; font-size: 13px; }
 .widen select { width: auto; margin-left: 8px; }
 
-.layer { border-top: 1px solid #8883; padding-top: 8px; margin-top: 16px; }
+/* --- the map: one band per layer, cards reflowing inside --- */
+.band { border: 1px solid #8884; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+.bandhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.bandhead h3 { margin: 0; font-size: 15px; }
+.num {
+  display: inline-block; min-width: 20px; height: 20px; line-height: 20px; text-align: center;
+  border-radius: 5px; background: #8882; font-size: 12px; margin-right: 6px;
+}
+.bandmeta { display: flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.7; }
+.bandexp { font-size: 13px; opacity: 0.75; margin: 6px 0 12px; cursor: pointer; }
+.bandexp.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* auto-fit is what makes this work on every screen: 4-up on a monitor,
+   2-up on a tablet, 1-up on a phone, with no breakpoint maintenance. */
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.ccard {
+  border: 1px solid #8884; border-radius: 8px; padding: 10px;
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+}
+.cname { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.cdomain { font-size: 11px; opacity: 0.55; overflow-wrap: anywhere; }
+.cliner { font-size: 12.5px; opacity: 0.85; margin: 4px 0 0; flex: 1; }
+.cfoot { display: flex; align-items: center; gap: 6px; font-size: 11px; opacity: 0.7; margin-top: 8px; flex-wrap: wrap; }
+.dots { display: inline-flex; gap: 2px; }
+.dots b { width: 5px; height: 5px; border-radius: 50%; background: #8884; }
+.dots b.on { background: #22c55e; }
+.cfoot .tiers { font-weight: 400; opacity: 0.8; }
+
+.collapsible { border-top: 1px solid #8883; margin-top: 16px; padding-top: 8px; }
+.clphead { width: 100%; text-align: left; border: none; background: transparent; padding: 6px 0; font-size: 14px; }
+.clphead .count { opacity: 0.6; font-size: 12px; }
+.clpbody { padding-bottom: 8px; }
+.clpbody li { margin-bottom: 8px; font-size: 13px; }
+
 .status { font-size: 11px; padding: 2px 6px; border-radius: 10px; background: #8882; text-transform: uppercase; }
 .status.ok { background: #22c55e33; }
 .status.no_results, .status.no_verified_companies { background: #f9731633; }
@@ -92,3 +125,27 @@ input.answered { border-color: #38bdf8; background: #38bdf814; }
 .badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #38bdf833; margin-left: 6px; text-transform: uppercase; }
 .badge.warn { background: #f9731633; }
 ol li { margin-bottom: 14px; }
+
+/* --- narrow screens --- */
+@media (max-width: 680px) {
+  main { padding: 0 12px 60px; }
+  /* Label-beside-control doesn't fit; stack it and let controls go full width. */
+  .prow { flex-direction: column; align-items: stretch; gap: 6px; margin-bottom: 14px; }
+  .prow input { width: 100%; }
+  .seg { width: 100%; }
+  .seg button { flex: 1; text-align: center; padding: 7px 6px; }
+  /* The header is sticky, so it must stay short or it eats the screen. */
+  .topbar { flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+  .topactions { width: 100%; justify-content: flex-end; }
+  .redraft textarea { min-height: 110px; }
+  .chips input { width: 100%; }
+  .chip span { max-width: 180px; }
+  .layerrow { flex-wrap: wrap; }
+  .layerrow input { min-width: 0; }
+  .grid { grid-template-columns: 1fr; }
+}
+
+/* Between phone and desktop, two cards across reads better than one wide one. */
+@media (min-width: 681px) and (max-width: 900px) {
+  .grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+}
