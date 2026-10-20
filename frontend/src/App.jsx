@@ -1,26 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRun, respond } from "./api.js";
 
-// A real propose takes ~70s and a full execute pass considerably longer. A
-// bare "Working…" for that long reads as a hang -- which it did, to the
-// first person who tried the deployed demo. These are elapsed-time cues,
-// deliberately not a fake progress bar: the backend doesn't stream phase
-// updates, so claiming to know the current step would be made up.
-const STAGES = [
-  [0, "Searching the web for how this space is structured…"],
-  [15, "Reading what came back…"],
-  [35, "Drafting a structure…"],
-  [70, "Still working. A first draft usually lands around now…"],
-  [110, "Taking longer than usual, but the run is still going."],
-];
-
-const RESEARCH_STAGES = [
-  [0, "Researching companies for each layer…"],
-  [30, "Corroborating each company against independent sources…"],
-  [90, "Verifying the companies that made the cut…"],
-  [180, "Assembling the map…"],
-  [300, "Still going. Bigger maps take a few minutes."],
-];
+// The server reports which graph node is running, so these are the real
+// phase, not a guess from elapsed time. Keyed by node name.
+const PHASES = {
+  recon: "Searching the web for how this space is structured…",
+  propose: "Drafting a structure…",
+  confirm: "Locking the scope…",
+  execute: "Researching companies for each layer…",
+  verify: "Checking each company exists and belongs where it landed…",
+  synthesize: "Assembling the map…",
+};
 
 const BREADTH_OPTIONS = [10, 25, 50];
 const DEFAULT_BREADTH = 25;
@@ -35,7 +25,7 @@ export default function App() {
   const [maps, setMaps] = useState(null); // {used, limit, owner}
   const [topic, setTopic] = useState("");
   const [dirty, setDirty] = useState(false); // has the user touched anything?
-  const [stage, setStage] = useState("propose"); // which wait the user is in
+  const [stage, setStage] = useState(null); // graph node currently running
 
   function routePayload(res) {
     if (res.maps) setMaps(res.maps);
@@ -59,11 +49,17 @@ export default function App() {
     }
   }
 
+  // The server tells us which node is running as the job progresses.
+  const onPhase = (job) => {
+    if (job.phase) setStage(job.phase);
+    if (job.maps) setMaps(job.maps);
+  };
+
   const start = (t) =>
     guard(async () => {
-      setStage("propose");
+      setStage(null);
       setTopic(t);
-      const res = await createRun(t);
+      const res = await createRun(t, onPhase);
       setRunId(res.run_id);
       setDirty(false);
       routePayload(res);
@@ -71,9 +67,8 @@ export default function App() {
 
   const send = (payload) =>
     guard(async () => {
-      // Continuing runs the whole research pass; a redraft just re-proposes.
-      setStage(payload.type === "direct_edit" || payload.type === "none" ? "research" : "propose");
-      const res = await respond(runId, payload);
+      setStage(null);
+      const res = await respond(runId, payload, onPhase);
       setDirty(false);
       routePayload(res);
     }, review ? "review" : "topic");
@@ -105,7 +100,7 @@ export default function App() {
       )}
       {phase === "topic" && <h1>Market Map Agent</h1>}
       {error && <div className="error">{friendlyError(error)}</div>}
-      {phase === "loading" && <Working stages={stage === "research" ? RESEARCH_STAGES : STAGES} />}
+      {phase === "loading" && <Working phase={stage} />}
       {phase === "topic" && <TopicForm onSubmit={start} />}
       {phase === "review" && (
         <ProposalReview review={review} onSend={send} onDirty={() => setDirty(true)} />
@@ -116,17 +111,21 @@ export default function App() {
   );
 }
 
-function Working({ stages }) {
+function Working({ phase }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, []);
-  const [, label] = [...stages].reverse().find(([at]) => secs >= at) || stages[0];
+  const label = PHASES[phase] || "Starting…";
+  const mins = Math.floor(secs / 60);
+  const elapsed = mins ? `${mins}m ${secs % 60}s` : `${secs}s`;
   return (
     <div className="working">
       <p>{label}</p>
-      <p className="meta">{secs}s elapsed · leaving this page loses the run</p>
+      <p className="meta">
+        {elapsed} elapsed · a full map usually takes several minutes
+      </p>
     </div>
   );
 }

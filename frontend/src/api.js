@@ -13,15 +13,44 @@ function _ownerHeaders() {
   }
 }
 
-async function post(path, body) {
+async function req(path, options) {
   const r = await fetch(`${BASE}${path}`, {
-    method: "POST",
+    ...options,
     headers: { "Content-Type": "application/json", ..._ownerHeaders() },
-    body: JSON.stringify(body || {}),
   });
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
 }
 
-export const createRun = (topic) => post("/runs", { topic });
-export const respond = (runId, payload) => post(`/runs/${runId}/respond`, payload);
+const post = (path, body) =>
+  req(path, { method: "POST", body: JSON.stringify(body || {}) });
+
+export const getRun = (runId) => req(`/runs/${runId}`, { method: "GET" });
+
+// Every call starts a background job and returns immediately; the result
+// arrives by polling. Railway's edge proxy kills any single HTTP request at
+// exactly 300s (measured: a research pass 502'd at 300.3s), and the research
+// pass routinely runs longer than that, so the old hold-the-connection
+// approach could never have worked for a real map regardless of patience.
+async function poll(started, onPhase) {
+  let job = started;
+  while (job.status === "running") {
+    await new Promise((r) => setTimeout(r, 2000));
+    job = await getRun(job.run_id);
+    if (onPhase) onPhase(job);
+  }
+  if (job.status === "error") throw new Error(job.error || "the run failed");
+  return job;
+}
+
+export async function createRun(topic, onPhase) {
+  const started = await post("/runs", { topic });
+  if (onPhase) onPhase(started);
+  return poll(started, onPhase);
+}
+
+export async function respond(runId, payload, onPhase) {
+  const started = await post(`/runs/${runId}/respond`, payload);
+  if (onPhase) onPhase(started);
+  return poll(started, onPhase);
+}
