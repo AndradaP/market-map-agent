@@ -7,11 +7,14 @@ appends JSON lines to backend/out/runs.local.jsonl.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
 from .config import Settings
 from .utils import now_iso
+
+log = logging.getLogger(__name__)
 
 _LOCAL_LOG = Path(__file__).resolve().parents[1] / "out" / "runs.local.jsonl"
 
@@ -70,26 +73,48 @@ on conflict (run_id) do nothing;
 """
 
 
+def _write_postgres(record: Dict[str, Any], settings: Settings) -> None:
+    import psycopg
+    from psycopg.types.json import Jsonb
+
+    payload = dict(record)
+    payload["confirmed_scope_summary"] = Jsonb(payload["confirmed_scope_summary"])
+    payload["warnings"] = Jsonb(payload["warnings"])
+    with psycopg.connect(settings.database_url.get_secret_value()) as conn:
+        conn.execute(_INSERT_SQL, payload)
+        conn.commit()
+
+
+def _write_local(record: Dict[str, Any]) -> None:
+    _LOCAL_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with _LOCAL_LOG.open("a") as fh:
+        fh.write(json.dumps(record) + "\n")
+
+
 def write_run_log(record: Dict[str, Any], settings: Settings) -> Dict[str, Any]:
+    """Best effort, always. This is an eval record, not the deliverable.
+
+    It used to raise, and raising here is uniquely expensive because this is
+    the LAST thing a run does: a complete map, minutes of research and real
+    API spend, was thrown away in production because this row couldn't be
+    written (the database was unreachable over IPv6 from the host). The map
+    is the product; the log row is bookkeeping. Never trade one for the
+    other -- registry.py already worked this way, this didn't.
+    """
     # Stub mode always uses the local file, regardless of DATABASE_URL --
     # found live via a failing test: a real DATABASE_URL sitting in a dev's
     # .env meant every offline/stub run (including the whole test suite)
     # silently wrote rows into the REAL production market_map_runs table.
-    # registry.py already gated its own Postgres path on stubs_enabled first;
-    # this one never did.
     if settings.database_url and not settings.stubs_enabled:
-        import psycopg
-        from psycopg.types.json import Jsonb
-
-        payload = dict(record)
-        payload["confirmed_scope_summary"] = Jsonb(payload["confirmed_scope_summary"])
-        payload["warnings"] = Jsonb(payload["warnings"])
-        with psycopg.connect(settings.database_url.get_secret_value()) as conn:
-            conn.execute(_INSERT_SQL, payload)
-            conn.commit()
-        return record
-
-    _LOCAL_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with _LOCAL_LOG.open("a") as fh:
-        fh.write(json.dumps(record) + "\n")
+        try:
+            _write_postgres(record, settings)
+            return record
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "run-log Postgres write failed, falling back to the local file: %s", exc
+            )
+    try:
+        _write_local(record)
+    except Exception as exc:  # noqa: BLE001 -- even losing the record beats losing the run
+        log.warning("run-log local write failed, continuing without it: %s", exc)
     return record
