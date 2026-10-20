@@ -1,12 +1,25 @@
 """FastAPI surface for the web form. Thin wrapper over the LangGraph app that
 supports the pause/resume gate.
 
-    POST /runs                 {topic}                    -> proposal (interrupt)
-    POST /runs/{id}/respond    {type, notes, ...}         -> next proposal | final map
-    GET  /runs/{id}                                       -> current state snapshot
+    POST /runs                 {topic}            -> {run_id, status: "running"}
+    POST /runs/{id}/respond    {type, notes, ...} -> {run_id, status: "running"}
+    GET  /runs/{id}                               -> job status, then the result
+
+Work runs in a background thread and the client polls, rather than the client
+holding one HTTP request open for the duration. The research pass makes
+thousands of network calls (a corroboration search, a URL fetch, a one-liner
+and a category-fit check per company, across every layer) and takes minutes.
+Held as a single request that died repeatedly in production: the browser gave
+up, and the user saw a network error with no way to recover a run the server
+had already paid for. Polling makes a dropped connection, a closed laptop and
+a redeploy all survivable, and lets the client show the phase the run is
+actually in instead of guessing from elapsed time.
 """
 from __future__ import annotations
 
+import logging
+import threading
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -15,6 +28,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.types import Command
 from pydantic import BaseModel
+
+log = logging.getLogger(__name__)
+
+# run_id -> job record. In-memory on purpose: it mirrors graph state that the
+# checkpointer already owns, so losing it on restart costs the phase label,
+# not the run (when the checkpointer is Postgres-backed).
+_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs_lock = threading.Lock()
 
 from .checkpointer import build_checkpointer
 from .config import get_settings
@@ -73,23 +94,70 @@ def _interrupt_payload(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     intr = result.get("__interrupt__")
     if not intr:
         return None
-    first = intr[0]
+    first = intr[0] if isinstance(intr, (list, tuple)) else intr
     return getattr(first, "value", first)
 
 
-def _shape(
-    result: Dict[str, Any], run_id: str, maps: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    payload = _interrupt_payload(result)
-    base = {"run_id": run_id, "maps": maps}
-    if payload is not None:
-        return {**base, "status": "awaiting_confirmation", "review": payload}
-    return {
-        **base,
-        "status": "complete",
-        "final_output": result.get("final_output"),
-        "metrics": result.get("metrics"),
+def _run_job(run_id: str, graph_input: Any, cfg: Dict[str, Any]) -> None:
+    """Drive the graph to its next stopping point, recording which node is
+    running as it goes. Streamed rather than invoked so `phase` is the node
+    actually executing, not an inference from how long we've been waiting."""
+    job = _jobs[run_id]
+    try:
+        review = None
+        for chunk in _ctx["graph"].stream(graph_input, cfg, stream_mode="updates"):
+            if not isinstance(chunk, dict):
+                continue
+            for node, payload in chunk.items():
+                if node == "__interrupt__":
+                    review = _interrupt_payload({"__interrupt__": payload})
+                else:
+                    job["phase"] = node
+        if review is not None:
+            job.update(status="awaiting_confirmation", review=review, phase=None)
+            return
+        values = _ctx["graph"].get_state(cfg).values
+        job.update(
+            status="complete",
+            final_output=values.get("final_output"),
+            metrics=values.get("metrics"),
+            phase=None,
+        )
+    except Exception as exc:  # noqa: BLE001 -- surfaced to the client, not swallowed
+        log.exception("run %s failed", run_id)
+        job.update(status="error", error=f"{type(exc).__name__}: {exc}", phase=None)
+
+
+def _start_job(run_id: str, graph_input: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    with _jobs_lock:
+        existing = _jobs.get(run_id)
+        if existing and existing["status"] == "running":
+            return existing  # already in flight; a double-click must not fork it
+        _jobs[run_id] = {
+            "status": "running",
+            "phase": None,
+            "review": None,
+            "final_output": None,
+            "metrics": None,
+            "error": None,
+            "started_at": time.time(),
+        }
+    threading.Thread(target=_run_job, args=(run_id, graph_input, cfg), daemon=True).start()
+    return _jobs[run_id]
+
+
+def _job_view(run_id: str, job: Dict[str, Any], maps: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    out = {
+        "run_id": run_id,
+        "status": job["status"],
+        "phase": job.get("phase"),
+        "elapsed_s": round(time.time() - job["started_at"], 1),
+        "maps": maps,
     }
+    for key in ("review", "final_output", "metrics", "error"):
+        if job.get(key) is not None:
+            out[key] = job[key]
+    return out
 
 
 def _maps_counter(request: Request, settings) -> Dict[str, Any]:
@@ -134,8 +202,8 @@ def create_run(body: CreateRun, request: Request) -> Dict[str, Any]:
             )
     run_id = uuid4().hex
     cfg = {"configurable": {"thread_id": run_id}}
-    result = _ctx["graph"].invoke({"topic": body.topic, "run_id": run_id}, cfg)
-    return _shape(result, run_id, _maps_counter(request, settings))
+    job = _start_job(run_id, {"topic": body.topic, "run_id": run_id}, cfg)
+    return _job_view(run_id, job, _maps_counter(request, settings))
 
 
 def _is_fresh_map_request(body: RespondBody) -> bool:
@@ -151,10 +219,16 @@ def _is_fresh_map_request(body: RespondBody) -> bool:
 @app.post("/runs/{run_id}/respond")
 def respond(run_id: str, body: RespondBody, request: Request) -> Dict[str, Any]:
     cfg = {"configurable": {"thread_id": run_id}}
+    settings = get_settings()
+    # Check the job record before the checkpointer: a run that's still
+    # working hasn't necessarily written state yet, and reading first would
+    # 404 a run that plainly exists.
+    running = _jobs.get(run_id)
+    if running and running["status"] == "running":
+        return _job_view(run_id, running, _maps_counter(request, settings))
     snap = _ctx["graph"].get_state(cfg)
     if not snap.created_at:
         raise HTTPException(404, f"unknown run {run_id}")
-    settings = get_settings()
     if _is_fresh_map_request(body) and not _is_owner(request, settings):
         try:
             check_and_record(client_ip(request), settings)
@@ -163,25 +237,35 @@ def respond(run_id: str, body: RespondBody, request: Request) -> Dict[str, Any]:
                 429,
                 f"Daily demo limit reached ({exc.scope}: {exc.limit}/day). Try again tomorrow.",
             )
-    result = _ctx["graph"].invoke(Command(resume=body.model_dump()), cfg)
-    return _shape(result, run_id, _maps_counter(request, settings))
+    job = _start_job(run_id, Command(resume=body.model_dump()), cfg)
+    return _job_view(run_id, job, _maps_counter(request, settings))
 
 
 @app.get("/runs/{run_id}")
-def get_run(run_id: str) -> Dict[str, Any]:
+def get_run(run_id: str, request: Request) -> Dict[str, Any]:
+    """What the client polls while a job runs."""
+    job = _jobs.get(run_id)
+    if job is not None:
+        return _job_view(run_id, job, _maps_counter(request, get_settings()))
+
+    # No job record: this process didn't start the run, or restarted since.
+    # The checkpointer may still hold the state, so answer from that rather
+    # than claiming the run never existed.
     cfg = {"configurable": {"thread_id": run_id}}
     snap = _ctx["graph"].get_state(cfg)
     if not snap.created_at:
         raise HTTPException(404, f"unknown run {run_id}")
     values = snap.values
+    final = values.get("final_output")
     return {
         "run_id": run_id,
-        "next": list(snap.next),
+        "status": "complete" if final else "interrupted",
+        "phase": None,
+        "maps": _maps_counter(request, get_settings()),
+        "final_output": final,
+        "metrics": values.get("metrics"),
         "topic": values.get("topic"),
         "proposal": values.get("proposal"),
         "confirmed_scope": values.get("confirmed_scope"),
-        "rescope_count": values.get("rescope_count", 0),
-        "cap_hit": values.get("cap_hit", False),
-        "final_output": values.get("final_output"),
-        "metrics": values.get("metrics"),
+        "next": list(snap.next),
     }
